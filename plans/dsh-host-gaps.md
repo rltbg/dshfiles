@@ -309,6 +309,20 @@ hook, the payload, and what a plugin does with it today. Filing is a public post
    envelope field) on every RPC, and have native controllers (`session/follow`, `session/create`, `session/prompt`)
    expose it to plugin listeners, so a browser interaction and the Host work it starts are one trace.
 
+### Draft ready to file: session replay retention
+
+One ask, with the 2026-11-09 measurement in [RAM usage](../docs/ram-usage.md#what-the-memory-is):
+
+1. **Trim settled attempt streams.** A restarted Host with 6 attached clients holds a 2.82 GB live heap; 2.03 GB of it
+   is strings under `assistant/message → data.stream[] → chunk.replayState.blocks[] → thinkingSignature` for the live
+   Sessions. Dropping the _duplicate_ stream copy is now done locally by the
+   [`@dshfiles/agent-loop` fork](../plugins/@dshfiles/agent-loop/README.md), measured at 433 KB per 760 messages
+   (~9.5 % of `assistant/message` bytes) — useful, but it does not explain a multi-GB heap. What is left to ask upstream
+   is the real question: a supported _retention_ bound for decoded Session events (per-client replay copies, the
+   `request/header` tool catalog repeated per request group), or a documented "safe to drop after settle" guarantee for
+   the whole embedded stream so older settled attempts can be trimmed. A client-side per-thread bound is the matching
+   ask for the browser tab, measured at 3.3 GB in one renderer. Not filed: publishing is the user's call.
+
 ## Triage, 2026-10-19
 
 - The file held the same table three times (163 rows) with drifted wording; it is
