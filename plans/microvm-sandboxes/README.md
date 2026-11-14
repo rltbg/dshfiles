@@ -12,7 +12,9 @@ later behind the same port, for dense Linux servers.
 **Status:** plan only. Nothing is built. Statements marked _(verify in P0)_ are assumptions that the first phase
 must confirm or replace before any later phase starts.
 
-**Resume here:** Phase 0, spike S1.
+**Resume here:** Phase 0. Spike S3 is done and reopens the central choice of section 3.1: see
+[P0 findings](P0-findings.md). Next: run S2 and S12 here, then decide between architectures A and B with the
+user. Nothing in P1 starts before that decision.
 
 | Phase | Deliverable                                                  | Where it is tested                    | State       |
 | ----- | ------------------------------------------------------------ | ------------------------------------- | ----------- |
@@ -115,6 +117,12 @@ Why this and not "run only the shell commands in the sandbox":
 | --------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- |
 | **Guest runtime** (chosen)              | nothing of the agent: loop, file tools, shell, jobs, MCP | full isolation; reuses the remote-thread path that already works          |
 | Exec-only (swap the subprocess service) | the agent loop, file tools and MCP servers, in the Host  | a file tool or MCP server still reads the host; needs forks of every tool |
+
+**Under review (2026-11-14).** S3 showed the verdict on exec-only above is wrong: DSH core documents replacing
+`ctx.fs`, `ctx.subprocess` and `ctx.sandbox` as the route for containers and microVMs, and the core file and
+shell tools already go through those seams. [P0 findings](P0-findings.md) compares the two architectures. The
+rest of this plan (providers, git sync, network, tests, budgets) holds for both; sections 3.2, 3.4, 3.7 and 3.11
+change if B is chosen.
 
 Cost of the choice: each sandbox pays a runtime's RAM and start time. Section 3.11 covers the start time. If P0
 shows the guest runtime cannot fit the budgets in section 6, exec-only becomes the fallback and this plan is
@@ -386,6 +394,7 @@ Throwaway scripts in a scratch directory, run on the user's local machines. No p
 | S9 | Does microsandbox run on the user's Mac? | S1 repeats on macOS; the minimum macOS version and chip are recorded |
 | S10 | Is the read-only mount enforced? | a root process in the guest cannot write through a read-only mount, with each provider, on each system |
 | S11 | Does the hardened container start the same image, with Docker and with Podman? | S1 and S2 repeat with each engine and the flags of section 3.9; rootless status recorded |
+| S12 | Architecture B: can one `ctx.fs` + `ctx.subprocess` provider route each Session's calls to its own sandbox? | here, with Docker: two threads each edit a file and run a command in their own container, with no cross-talk; terminals and background jobs checked |
 
 **Decisions to take with the user at the end of P0:** guest runtime vs exec-only (S1–S3); model proxy vs
 injected key (S4); the Docker route for each provider (S5); which start levers are needed (S1, S6); whether
