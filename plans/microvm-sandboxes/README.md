@@ -16,10 +16,10 @@ must confirm or replace before any later phase starts.
 
 | Phase | Deliverable                                                  | Where it is tested                    | State       |
 | ----- | ------------------------------------------------------------ | ------------------------------------- | ----------- |
-| P0    | Feasibility spikes and decisions                             | local Linux, Mac and Windows machines | not started |
+| P0    | Feasibility spikes and decisions                             | here where possible; Fedora for KVM   | not started |
 | P1    | Provider port, orchestrator, fake provider                   | here                                  | not started |
 | P2    | Project in, changes back out (git sync), credentials, egress | here, with the fake provider          | not started |
-| P3    | Container provider (Docker, Podman)                          | local machines; here if Docker starts | not started |
+| P3    | Container provider (Docker, Podman)                          | here (Docker); Podman on Fedora       | not started |
 | P4    | microsandbox provider on Linux, macOS and Windows            | local machines                        | not started |
 | P5    | Evaluation of the two providers, and the default             | local machines                        | not started |
 | P6    | Harness in Docker                                            | local Linux machine                   | not started |
@@ -92,10 +92,15 @@ Why not the others: QEMU runs everywhere but is large, slower to start and has t
 Firecracker has no macOS support and reaches Windows only through WSL2; Apple Virtualization is macOS only;
 Kata Containers and gVisor are Linux only (they remain usable as a container runtime, section 3.9).
 
-Where things are tested: this cloud session has no `/dev/kvm`, so it cannot start a microVM. The Docker CLI is
-installed but its daemon is not running. Everything except the two real providers is built and tested here
-against the fake provider. The provider parts run on the user's local machines through one acceptance command
-that writes a report (section 5.1).
+Where things are tested:
+
+- **Here (cloud session).** No `/dev/kvm`, so no microVM. Docker 29 does run here (started by hand, rootful,
+  cgroup v1), and a hardened container starts (`--cap-drop ALL`, `no-new-privileges`, read-only root, no
+  network, non-root user; checked 2026-11-14). So the orchestrator, the git sync and the **container provider
+  with Docker** are built and tested here. As much as possible is done here.
+- **The user's machine:** Fedora 44, AMD Ryzen (x86_64), 16 GB of RAM. It runs the final tests: microsandbox
+  (needs KVM), Podman, rootless engines, and the budgets. It is the reference machine for section 6.
+- macOS and Windows are tested when such a machine is available; until then their rows stay "not verified".
 
 ## 3. Design
 
@@ -297,8 +302,8 @@ reason and the container offered; the answer is remembered. A sandbox never chan
 | macOS, Intel                                           | no           | yes, in the engine VM |
 | Windows with Windows Hypervisor Platform               | yes          | yes, in WSL2          |
 
-**The container provider's hardening:** rootless where the engine allows it (Podman by default, Docker rootless
-when set up), all capabilities dropped, `no-new-privileges`, the default seccomp profile, a user namespace, a
+**The container provider's hardening:** rootless is recommended, not required: a rootful engine works and
+shows a warning with how to switch (Podman is rootless by default; Docker has a rootless mode). Beyond that: all capabilities dropped, `no-new-privileges`, the default seccomp profile, a user namespace, a
 read-only root with a size-limited writable layer, process, memory and CPU limits, no host socket and no device.
 On Linux the setting `container.runtime` can select gVisor (`runsc`) or Kata for a stronger boundary. The engine
 (`docker` or `podman`) is detected, and can be forced with `container.engine`.
@@ -331,9 +336,9 @@ T3 details:
 - **New thread:** the host chip lists, under each sandbox-capable host, a **Sandbox** destination, and it is
   the default (setting `isolation.default`, values `sandbox` or `workspace`, default `sandbox`). The user can
   switch one thread, or the default, back to a plain workspace.
-- **When no provider is ready** on the chosen host, the thread is not silently run unisolated. The setting
-  `isolation.whenUnavailable` decides: `ask` (default) shows why and offers "Run without sandbox", "Use a remote
-  sandbox host" and the `sandbox_doctor` fix; `workspace` falls back with a visible badge; `refuse` blocks.
+- **When no provider is ready** on the chosen host, the thread runs as it does today, in a plain thread
+  workspace, with a visible "Not sandboxed" badge that links to `sandbox_doctor`. The setting
+  `isolation.whenUnavailable` can change that: `workspace` (default), `ask` or `refuse`.
 - **Sandboxes page** (under Hosts): one row per sandbox with host, provider, isolation, state, thread, CPU,
   memory, disk, age and the actions Stop, Start, Export, Destroy, Logs.
 - **Thread header:** a badge "Sandbox · microVM · `<host>`" or "Sandbox · container · `<host>`", the workspace
@@ -506,7 +511,7 @@ column says what is expected of containers, so a weaker result is recorded, neve
 | I8 | No real key in the guest | scan A's memory and disk for the real model key | absent; the per-sandbox token is present | must pass |
 | I9 | Revocation works | destroy A, replay its token against the model proxy | refused | must pass |
 | K1 | Own kernel | compare the kernel identity seen in A, in B and on the host | A and B each have their own | expected to fail: recorded as "shared kernel" |
-| K2 | Root in the guest stays in the guest | a root process in A tries known namespace and device escapes | none succeeds | must pass with rootless and a user namespace; a rootful engine is flagged |
+| K2 | Root in the guest stays in the guest | a root process in A tries known namespace and device escapes | none succeeds | must pass; a rootful engine is also reported with a warning |
 | W1 | Changes come back | the agent edits a tracked file and creates an untracked one, without committing | after the turn both are in the thread workspace on the host | must pass |
 | W2 | The user's checkout is untouched | hash the user's checkout and `.git` configuration and hooks before and after a session | identical | must pass |
 | W3 | Nothing executable crosses | the agent writes a git hook, a `.gitmodules` entry and a filter attribute in the sandbox | no hook is installed on the host, no submodule is fetched, no filter runs | must pass |
@@ -519,7 +524,7 @@ column says what is expected of containers, so a weaker result is recorded, neve
 | C3 | Provider neutrality | the port's contract suite against fake, container and microsandbox | same suite, all pass | must pass |
 | C4 | Operating systems | the provider's gate on Linux, Windows and macOS | passes on all three | must pass |
 | C5 | Start time | 50 creates in a row, timing create → first prompt accepted | p95 at most 2 s | must pass |
-| D1 | Sandbox is the default | create a thread with default settings on a ready host, and on a host with no provider | first runs in a sandbox; second asks, and never runs unisolated without the user's choice | must pass |
+| D1 | Sandbox is the default | create a thread with default settings on a ready host, and on a host with no provider | first runs in a sandbox; second runs in a plain workspace with the "Not sandboxed" badge | must pass |
 | D2 | Retention is configurable | set `retention.stoppedHours` to 1 on a host and 0 on one sandbox | destroyed after 1 h and at stop respectively; the default host keeps them 24 h | must pass |
 | D3 | The provider never changes silently | make the microVM provider unavailable on a host set to `auto` | the user is asked before a container is used; the thread badge names the provider | must pass |
 
@@ -578,13 +583,13 @@ provider; P5 records where one misses.
 | microsandbox is beta and changes under us | breakage on update | pinned version, the port's contract suite on every bump, the container provider as a working alternative |
 | Its Windows or macOS support is not what the README says | a system without a microVM | S8 and S9 first; fallbacks in order: WSL2, the container provider, QEMU as a later provider |
 | A container is taken for a microVM | false sense of security | the `isolation` capability is shown on the thread, the page and in `sandbox_inspect`; K1 is recorded as failing; never chosen silently (D3) |
-| Rootful Docker, or the host socket given to the harness | a container escape reaches the host as root | rootless by default, the socket route off and labelled, `sandbox_doctor` flags a rootful engine, K2 |
+| Rootful Docker, or the host socket given to the harness | a container escape reaches the host as root | rootless recommended with a warning otherwise, a user namespace, the socket route off and labelled, K2 |
 | Guest runtime too heavy | density and the 2 s start miss the budgets | minimal profile, warm pool, golden snapshot (section 3.11), measured in P0; exec-only fallback decided at P0 |
 | Git sync misses something the user expects (ignored files, large binaries) | "my changes are not there" | the working tree commit includes untracked files; `sandbox_export` for the rest; `mount-readonly` for projects that need the live tree |
 | A user turns on `mount` without seeing the consequence | host code execution through the project | off by default, per project, a permanent badge, and the explanation of section 3.5 in the setting |
 | Snapshot clones share secrets or randomness | cross-sandbox leak | the guest agent re-identifies and reseeds after restore; S6 checks it; no secret is in a snapshot by construction |
 | Model proxy unsupported by a provider | key must enter the guest | fallback key, spend-capped and short-lived, flagged in the UI |
-| Sandbox by default surprises a user whose machine cannot run one | threads blocked | `isolation.whenUnavailable` asks with three ways forward; never a silent unisolated run |
+| A machine cannot run any sandbox | the user believes a thread is isolated when it is not | the thread still runs, as today, with a permanent "Not sandboxed" badge and the fix one click away |
 | multi-host changes underneath | rework | only two seams are touched: the `runtime-source` registry and the remote-call allowlist |
 | Hypervisor, engine or kernel CVE | guest escape | pinned versions with checksums, an update policy in each provider README, never run as root |
 
@@ -599,13 +604,10 @@ provider; P5 records where one misses.
 | Network | denied by default, with an allowlist |
 | Default | a new thread runs in a sandbox by default |
 | Retention | 24 h by default, configurable per host and per sandbox |
-| Testing | everything except the real providers here; the providers on the user's local machines, by committed report |
+| Testing | as much as possible here, the container provider with Docker included; final tests (microsandbox, Podman, budgets) on the user's Fedora 44 machine, by committed report |
+| No provider ready | the thread runs as today in a plain workspace, with a "Not sandboxed" badge |
+| Rootless containers | recommended, with a warning when the engine is rootful; not required |
 
 ## 9. Still open
 
-1. The local test machines: Linux distribution and CPU architecture, macOS version and chip, Windows version.
-   They set the image architectures to build first and the minimum versions we state.
-2. When no provider is ready, is `ask` the right default for `isolation.whenUnavailable`, or should it be
-   `refuse`?
-3. For containers, is rootless a requirement (refuse a rootful engine), or a recommendation (allow it with a
-   warning)?
+1. macOS and Windows test machines: none named yet. Their support stays "not verified" until one is available.
