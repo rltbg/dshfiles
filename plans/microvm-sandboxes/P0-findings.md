@@ -65,12 +65,62 @@ and shell tools already go through them. The two architectures must be compared 
 Not yet verified for B: whether one provider can route each call to the right sandbox (by the Session, its
 `cwd` or the path), and how terminal sessions and background jobs behave through a remote subprocess provider.
 
+## S12. Architecture B: one provider per seam, routed per thread (run here, 2026-11-14)
+
+Script: [`spikes/s12-routing.mjs`](spikes/s12-routing.mjs). Run: `node plans/microvm-sandboxes/spikes/s12-routing.mjs <checkout>`
+with Docker running. It starts two hardened containers, mounts one `FileSystem` and one `SubprocessRuntime`
+subclass (core's own abstract classes, from the workspace's installed packages) in a Cordis context, and gives
+each thread a working directory that exists only as a name on the Host (`/sandboxes/thread-a/workspace`).
+
+Result: **12 of 12 checks pass.**
+
+| Check | Observation |
+| --- | --- |
+| The providers mount under the names core consumers use | `ctx.fs` and `ctx.subprocess` are instances of core's classes |
+| A file written through `ctx.fs` is seen by a command spawned through `ctx.subprocess` | `cat` printed the content |
+| Thread B, same relative path | a different target; A's file does not exist; B's workspace is empty; uid 1000; its own container |
+| The host | has no such file and no `/sandboxes` directory |
+| A path outside every sandbox | refused (`SANDBOX_NO_ROUTE`) |
+| `..` from A into B's folder, and an absolute path into B asked from A | refused (`SANDBOX_CROSS_ROUTE`) |
+| A command whose working directory is outside every sandbox | refused |
+| 40 interleaved writes and reads across the two threads | each thread reads back only its own content |
+| Exit codes | returned (`7`) |
+
+What it taught:
+
+- **Routing works by working directory.** `resolve(path, { cwd })` and `spawn({ cwd })` both carry it, so one
+  provider can serve every thread.
+- **The router is the boundary between threads.** The first version of the script routed `..` from A into B's
+  folder to B. The seams carry a path, not a Session, so the provider must refuse a path that leaves the
+  sandbox of the working directory it was asked from. That check is now in the script and tested.
+- **`resolveExecutable(command, env)` and `terminalEnvironment()` carry no working directory.** The spike
+  returns the bare command and lets the guest resolve it at spawn. Whether core's bash executor accepts that is
+  not verified.
+- **Cordis serves a service through a Proxy,** so a provider class cannot use `#private` members.
+- **`docker exec` per call is too slow for real use:** about 1.5 s per write-then-read under 40 concurrent
+  operations (three `docker exec` each); one sequential `docker exec` takes 86 ms at p50 here. A provider needs one
+  long-lived guest agent per sandbox and a stream to it.
+- Container start: about 150 to 180 ms each here.
+
+Read from core afterwards, which lowers two of the unknowns:
+
+- The core file tools pass the thread's working directory: `dsh-tool-fs` calls
+  `fs.resolve(path, await sessionResolveOptions(ctx, exec))` at each of its three resolve sites.
+- The core bash executor spawns with `cwd: spec.workdir` through `subprocess.spawn`.
+- Core packages that reach `ctx.subprocess`, and would therefore run in the sandbox: `dsh-bash-local`,
+  `dsh-pwsh-local`, `dsh-shell`, `dsh-terminal-bash`, `dsh-tool-fs-search` (core's grep and glob),
+  `dsh-workspace-changes`, `dsh-ptc-runtime-node`, `dsh-experimental-worktree`, `dsh-host-open-in-app`.
+
+Not covered by this spike: core's own tools running on top of these providers in a real turn (whether they
+always pass the thread's `cwd`), terminal sessions, background jobs, file watching, `editText`, and the
+guest agent.
+
 ## Spikes still to run
 
 | Spike | Where | State |
 | --- | --- | --- |
 | S2 (A: multi-host mirrors a second local runtime) | here | not run |
-| S12 (B: one fs + subprocess provider routing two Sessions to two containers) | here, with Docker | not run; new |
+| S12 (B: one fs + subprocess provider routing two threads to two containers) | here, with Docker | seam-level routing proven; a real turn through core's tools not yet |
 | S4 custom model base URL | here | not run |
 | S11 hardened container runs the guest | here | container start proven; guest not yet |
 | S1, S5–S10 | Fedora 44 machine | not run |
