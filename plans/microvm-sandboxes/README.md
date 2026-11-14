@@ -1,25 +1,26 @@
 # MicroVM sandboxes: isolated parallel agents on any host
 
-Run each agent thread in its own microVM, on this machine or on a remote one, from a harness that runs on bare
-metal or in Docker. Firecracker is the first provider; the design keeps the hypervisor behind a port so other
-providers can follow.
+Run each agent thread in its own microVM, on this machine or on a remote one, from a harness that runs on Linux,
+macOS or Windows (through WSL2), directly or in Docker. Firecracker is the first provider; the hypervisor sits
+behind a port, and a local macOS provider follows right after it.
 
 **Status:** plan only. Nothing is built. Statements marked _(verify in P0)_ are assumptions that the first phase
 must confirm or replace before any later phase starts.
 
 **Resume here:** Phase 0, spike S1.
 
-| Phase | Deliverable                                             | State       |
-| ----- | ------------------------------------------------------- | ----------- |
-| P0    | Feasibility spikes and decisions                        | not started |
-| P1    | Provider port, orchestrator, fake provider (no KVM)     | not started |
-| P2    | Firecracker provider on a bare Linux host               | not started |
-| P3    | Workspace in, results out, credentials, egress          | not started |
-| P4    | Harness in Docker                                       | not started |
-| P5    | MicroVMs on a remote machine                            | not started |
-| P6    | UI, agent tools, telemetry, docs                        | not started |
-| P7    | Fast start (snapshots, warm pool) and density           | not started |
-| P8    | Second provider, to prove the port                      | not started |
+| Phase | Deliverable                                                    | Where it is tested                 | State       |
+| ----- | -------------------------------------------------------------- | ---------------------------------- | ----------- |
+| P0    | Feasibility spikes and decisions                               | local KVM machine, local Mac       | not started |
+| P1    | Provider port, orchestrator, fake provider                     | here (no KVM needed)               | not started |
+| P2    | Firecracker provider on Linux, with the 2 s start              | local KVM machine                  | not started |
+| P3    | Workspace in, results out, credentials, egress                 | here with fake; local for the rest | not started |
+| P4    | Local macOS provider (Apple Virtualization)                    | local Mac                          | not started |
+| P5    | Windows through WSL2                                           | local Windows machine              | not started |
+| P6    | Harness in Docker                                              | local KVM machine                  | not started |
+| P7    | MicroVMs on a remote machine                                   | here with fake; local for the rest | not started |
+| P8    | UI, agent tools, telemetry, docs                               | here                               | not started |
+| P9    | Density: warm pool, pause on idle                              | local KVM machine                  | not started |
 
 ## 1. What we want
 
@@ -28,11 +29,15 @@ must confirm or replace before any later phase starts.
 2. **Three topologies, one behaviour.**
    - **T1 bare host:** the harness runs directly on a Linux machine and starts microVMs there.
    - **T2 Docker:** the harness runs in a container and still starts and reaches microVMs.
-   - **T3 remote:** the harness runs anywhere (macOS included) and the microVMs run on another machine.
-3. **It composes with multi-host.** One harness reaches several machines; each machine can run several sandboxes.
-4. **Provider-neutral.** Firecracker first. Adding a provider means writing one package, not touching the
+   - **T3 remote:** the harness runs anywhere and the microVMs run on another machine.
+3. **Three operating systems.** Linux, macOS and Windows (inside WSL2). On each, a sandbox is a real microVM.
+   A container is accepted only as a last-resort fallback, and is labelled as weaker isolation.
+4. **Fast.** At most 2 s from "create" to the first prompt accepted, on every platform.
+5. **Sandbox by default.** A new thread runs in a sandbox unless the user chooses otherwise.
+6. **It composes with multi-host.** One harness reaches several machines; each machine can run several sandboxes.
+7. **Provider-neutral.** Firecracker first, Apple Virtualization second. Adding a provider means writing one package, not touching the
    orchestrator, the UI or multi-host.
-5. **Stock DSH.** No core patch, as everywhere in this repository.
+8. **Stock DSH.** No core patch, as everywhere in this repository.
 
 Out of scope: a hosted multi-tenant service, GPU passthrough, Windows or macOS guests, live migration between
 machines.
@@ -57,8 +62,7 @@ From this repository:
 
 About Firecracker _(all to verify in P0 against the pinned release)_:
 
-- Linux with KVM only, x86_64 and aarch64. It does not run on macOS or Windows. This alone makes T3 mandatory
-  for a macOS user, and the provider port mandatory for a local macOS sandbox later.
+- Linux with KVM only, x86_64 and aarch64. It does not run natively on macOS or Windows.
 - One process per microVM, configured over a Unix-socket HTTP API, normally started through `jailer` (chroot,
   cgroup, seccomp, own uid/gid, own network namespace).
 - Block devices and network interfaces only. **No shared folders** (no virtio-fs, no 9p).
@@ -67,9 +71,19 @@ About Firecracker _(all to verify in P0 against the pinned release)_:
 - Snapshots (memory + device state) allow restoring a booted VM in well under a second. A restored clone shares
   its random state and identity with its source unless the guest reseeds.
 
-About this cloud session: `/dev/kvm` is absent, so nothing here can boot a microVM. P1 is designed to be built
-and tested without KVM; P2 onward needs a Linux machine with KVM (bare metal, or a cloud VM with nested
-virtualization).
+About the other platforms _(all to verify in P0)_:
+
+- **Windows:** WSL2 is a Linux VM and can expose `/dev/kvm` through nested virtualization. If so, Windows is
+  the Linux path unchanged: the harness and Firecracker both run inside WSL2. Native Windows (Hyper-V directly)
+  is out of scope.
+- **macOS:** Apple's Virtualization framework boots Linux microVMs on Apple silicon and Intel, with virtio-vsock,
+  virtio block devices and, from macOS 14, save and restore of a running VM. A small helper process drives it;
+  candidates are `vfkit` (a CLI over the framework) and `libkrun`. Docker Desktop on macOS cannot give a
+  container `/dev/kvm`, so Docker there would mean container isolation, not a microVM.
+
+Where things are tested: this cloud session has no `/dev/kvm`, so it cannot boot a microVM. Everything except
+the hypervisor is built and tested here against the fake provider. The Firecracker, macOS and WSL2 parts run on
+the user's local machines through one acceptance command that writes a report (section 5.1).
 
 ## 3. Design
 
@@ -85,8 +99,9 @@ Why this and not "run only the shell commands in the VM":
 | **Guest runtime** (chosen)              | nothing of the agent: loop, file tools, shell, jobs, MCP     | full isolation; reuses the remote-thread path that already works           |
 | Exec-only (swap the subprocess service) | the agent loop, file tools and MCP servers, in the Host      | a file tool or MCP server still reads the host; needs forks of every tool |
 
-Cost of the choice: each sandbox pays a runtime's RAM and boot time. P7 addresses both. If P0 shows the guest
-runtime cannot fit the budgets in section 6, exec-only becomes the fallback and this plan is revised before P1.
+Cost of the choice: each sandbox pays a runtime's RAM and boot time. Section 3.11 covers the start time. If P0
+shows the guest runtime cannot fit the budgets in section 6, exec-only becomes the fallback and this plan is
+revised before P1.
 
 ### 3.2 Components
 
@@ -104,9 +119,10 @@ control Host (T1 bare, or T2 in Docker)                    sandbox host (same ma
 | ------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `@dshfiles/sandbox-provider-port` | The contract a provider implements, as a dshx module. No behaviour.                              | dshx                               |
 | `@dshfiles/sandboxes`           | Orchestrator: records, lifecycle, reconciliation, quotas, egress proxy, model proxy, page, tools. | the port, multi-host, sqlite-store |
-| `@dshfiles/sandbox-firecracker` | Firecracker provider: images, jailer, API socket, vsock.                                          | the port                           |
+| `@dshfiles/sandbox-firecracker` | Firecracker provider (Linux, WSL2): images, jailer, API socket, vsock.                            | the port                           |
+| `@dshfiles/sandbox-applevz`     | Apple Virtualization provider (macOS): helper process, vsock, save and restore.                   | the port                           |
 | `@dshfiles/sandbox-fake`        | Test provider: runs the guest runtime as a plain local process in a scratch home.                | the port                           |
-| `tooling/sandbox-image`         | Reproducible build of the kernel, base rootfs and guest agent.                                    | none at run time                   |
+| `tooling/sandbox-image`         | Reproducible build of the kernel, base rootfs and guest agent, for x86_64 and aarch64.            | none at run time                   |
 
 Dependencies point one way ([plugin boundaries](../../docs/plugin-boundaries.md)): providers know only the port;
 `sandboxes` knows the port and multi-host; multi-host knows none of them. multi-host gains one registry module
@@ -130,7 +146,11 @@ One dshx contract, versioned, with capability flags so the orchestrator never gu
 | `logs`           | handle, byte bound                                           | bounded console tail                                           |
 | `snapshot` / `restore` | handle or snapshot id                                  | only when the capability is declared                           |
 
-Capabilities: `snapshot`, `pause`, `vsock`, `nic`, `hotResize`, `nestedOk`, `architectures`.
+Capabilities: `snapshot`, `pause`, `vsock`, `nic`, `hotResize`, `nestedOk`, `architectures`, and `isolation`
+(`microvm` or `container`), which the UI shows so a weaker fallback is never mistaken for a microVM.
+
+The guest image, the guest agent and everything in sections 3.4 to 3.8 are shared by all providers. A provider
+only boots that image and exposes the endpoint.
 
 `SandboxEndpoint` is the only thing the orchestrator needs to reach the guest: a host-side stream factory
 (`open(port) → duplex`). For Firecracker it is the vsock Unix socket; for the fake provider it is a loopback TCP
@@ -213,12 +233,14 @@ requested → preparing → booting → ready ⇄ paused → stopping → stoppe
   [orphan cleanup](../../docs/orphan-cleanup.md).
 - **Quotas per host:** maximum sandboxes, total vCPU, total memory, total disk. A request over quota is refused
   with the numbers and what to stop.
-- **Retention:** a stopped sandbox keeps its drives for a configurable time (default 24 h) so work can still be
-  landed, then is destroyed. Destroying a sandbox with unlanded commits requires an explicit opt-in argument.
+- **Retention:** a stopped sandbox keeps its drives so work can still be landed, then is destroyed. The delay
+  is the setting `retention.stoppedHours`: default 24, set per host, overridable per sandbox
+  (`sandbox_set_retention`), `0` meaning "destroy at stop". Destroying a sandbox with unlanded commits requires
+  an explicit opt-in argument.
 - **Identity:** each sandbox gets a fresh runtime identity and launch token at create, pinned in multi-host's
   directory like any runtime. A different runtime behind the same endpoint is refused.
 
-### 3.9 The three topologies
+### 3.9 Topologies and operating systems
 
 | | Where the provider runs | How the control Host reaches the guest | Host requirements |
 | --- | --- | --- | --- |
@@ -240,10 +262,23 @@ T3 details:
 A shipped `docker/compose.sandboxes.yml` documents T2: the device, the volume, the user and no extra
 capabilities.
 
+Which provider runs where:
+
+| Machine that hosts the microVMs | Provider | Notes |
+| --- | --- | --- |
+| Linux, bare or in Docker | Firecracker | needs `/dev/kvm` |
+| Windows | Firecracker, inside WSL2 | the harness runs in WSL2 too; needs nested virtualization _(verify in P0)_ |
+| macOS | Apple Virtualization | T1 only; Docker on macOS has no KVM, so T2 there uses T3 or the container fallback |
+| any, when no microVM provider is ready | container fallback, opt-in | shown as "container, weaker isolation"; never chosen silently |
+
 ### 3.10 What the user and the agent see
 
-- **New thread:** the host chip lists, under each sandbox-capable host, a **Sandbox** destination. Auto
-  placement may choose it when the user sets "isolate by default".
+- **New thread:** the host chip lists, under each sandbox-capable host, a **Sandbox** destination, and it is
+  the default (setting `isolation.default`, values `sandbox` or `workspace`, default `sandbox`). The user can
+  switch one thread, or the default, back to a plain workspace.
+- **When no provider is ready** on the chosen host, the thread is not silently run unisolated. The setting
+  `isolation.whenUnavailable` decides: `ask` (default) shows why and offers "Run without sandbox", "Use a remote
+  sandbox host" and the `sandbox_doctor` fix; `workspace` falls back with a visible badge; `refuse` blocks.
 - **Sandboxes page** (under Hosts): one row per sandbox with host, state, thread, CPU, memory, disk, age and
   the actions Stop, Start, Export, Destroy, Logs.
 - **Thread header:** a badge "Sandbox · `<host>`" and, when stopped, a Start control.
@@ -253,29 +288,47 @@ capabilities.
 - **Readiness:** `sandbox_doctor` reports why a host cannot run sandboxes (no KVM, jailer missing, cgroup not
   delegated, disk too small) and the exact fix for each.
 
+### 3.11 Starting in under 2 seconds
+
+Firecracker boots a kernel in a fraction of a second, but a DSH runtime measured about 8 s of CPU to boot with
+the full web composition. Two levers, in this order:
+
+1. **A minimal `sandbox` profile.** S1 measures its cold boot. If kernel + runtime already fit in 2 s, nothing
+   more is needed.
+2. **A golden snapshot, if not.** Once per image, the provider boots a guest until its runtime is idle and
+   saves it. Every "create" then restores that snapshot instead of booting. The guest agent gives the restored
+   VM a new identity, token and random seed before the first prompt. Booting from scratch only happens when the
+   image changes.
+
+Both providers declare the `snapshot` capability (Firecracker snapshots; macOS 14 save and restore). A provider
+without it must meet the budget by cold boot alone or declare a slower start, which the UI shows.
+
 ## 4. Phases
 
 Each phase ends with an exit gate. A phase does not start before the previous gate is met.
 
 ### P0. Feasibility spikes and decisions
 
-Throwaway scripts in a scratch directory, on a KVM Linux machine. No plugin code.
+Throwaway scripts in a scratch directory, run on the user's local machines. No plugin code.
 
 | Spike | Question | Done when |
 | ----- | -------- | --------- |
-| S1 | Does a stock DSH runtime boot in a Firecracker guest with a minimal profile? | a guest answers an authenticated RPC over vsock; boot time and settled RSS recorded |
+| S1 | Does a stock DSH runtime boot in a Firecracker guest with a minimal profile, and how fast? | a guest answers an authenticated RPC over vsock; create-to-ready time and settled RSS recorded against the 2 s budget |
 | S2 | Does multi-host mirror a Session of that guest through a plain loopback forward? | a thread created from a scratch control Host runs one fake-model turn in the guest |
 | S3 | Do file tools, MCP servers and the agent loop run in the Host process? | read from the installed core, with file and line; confirms or kills the exec-only fallback argument |
 | S4 | Can a guest provider use a custom base URL, so the model proxy works? | one model call from the guest goes through a host proxy that adds the key |
 | S5 | Does jailer work inside Docker with only `/dev/kvm`? | one microVM boots in a container without `--privileged`; the exact flags are written down |
 | S6 | Snapshot restore: time, and is the runtime usable after an identity and entropy reset? | restore-to-ready time recorded; two clones show different identities and random output |
+| S8 | Does Firecracker run inside WSL2? | `/dev/kvm` present in WSL2 on the test machine and S1 repeats there; the Windows settings needed are written down |
+| S9 | macOS: which helper drives Apple Virtualization, and does it give vsock and save/restore? | the same guest image (aarch64) boots on the Mac, answers over vsock, and restores from a saved state; helper chosen |
 | S7 | Guest proxy-only networking: do `git`, `pnpm install` and a model call work with no NIC? | all three succeed through the vsock proxy; a non-allowlisted host is refused |
 
 **Decisions to take with the user at the end of P0:** guest runtime vs exec-only (S1–S3); model proxy vs
-injected key (S4); in-container VMs vs T3-only for Docker (S5); the guest image base (distribution, init).
+injected key (S4); in-container VMs vs T3-only for Docker (S5); snapshot start vs cold boot (S1, S6); the macOS
+helper (S9); the guest image base (distribution, init).
 
 **Exit gate:** a written `P0-findings.md` in this folder with every spike's command, numbers and verdict, the
-four decisions, and section 6's budgets confirmed or revised.
+decisions, and section 6's budgets confirmed or revised.
 
 ### P1. Port, orchestrator and fake provider (no KVM needed)
 
@@ -289,14 +342,17 @@ four decisions, and section 6's budgets confirmed or revised.
 one fake-model turn, stops, restarts and destroys it; killing the Host mid-`booting` leaves no orphan process
 after restart; the port's contract tests pass against the fake provider.
 
-### P2. Firecracker provider on a bare Linux host (T1)
+### P2. Firecracker provider on Linux (T1), with the 2 s start
 
 1. `tooling/sandbox-image`: pinned kernel and rootfs build, checksums, secret scan, guest agent.
 2. `@dshfiles/sandbox-firecracker`: readiness (`describe`), image cache, jailer launch, API-socket configuration, vsock endpoint, bounded console log, stop and destroy.
 3. Resource limits: vCPU, memory, drive sizes, virtio rate limiters, cgroup limits through jailer.
+4. The start path chosen in P0 (section 3.11): minimal profile, and the golden snapshot with identity and
+   entropy reset if cold boot misses the budget.
 
 **Exit gate:** the port's contract tests pass against Firecracker; the P1 journey passes with the provider
-swapped; isolation tests I1–I6 of section 5 pass.
+swapped; isolation tests I1–I6 of section 5 pass; create → first prompt accepted is at most 2 s at p95 over 50
+creates.
 
 ### P3. Workspace, results, credentials, egress
 
@@ -308,49 +364,60 @@ swapped; isolation tests I1–I6 of section 5 pass.
 succeeds while no real key exists anywhere in the guest (checked by scanning guest memory and disk for the key);
 tests I7–I9 pass.
 
-### P4. Harness in Docker (T2)
+### P4. Local macOS provider
+
+`@dshfiles/sandbox-applevz`: the helper chosen in S9, the aarch64 (and x86_64 if needed) guest image, vsock
+endpoint, save and restore, readiness checks (macOS version, entitlement of the helper).
+
+**Exit gate:** on a Mac, the port's contract tests, the P1 journey, tests I1–I9 and the 2 s budget all pass,
+with no change outside the new package and the image build.
+
+### P5. Windows through WSL2
+
+Readiness checks and documentation: enabling nested virtualization, where the image cache lives, how the
+browser on Windows reaches the harness in WSL2. `sandbox_doctor` names each missing setting.
+
+**Exit gate:** on Windows, with the harness in WSL2, the P2 and P3 gates pass.
+
+### P6. Harness in Docker (T2)
 
 The compose file, the image for the harness itself, documentation of the exact flags from S5.
 
-**Exit gate:** the P2 and P3 gates pass with the control Host running in the container.
+**Exit gate:** the P2 and P3 gates pass with the control Host running in the container on Linux.
 
-### P5. Remote machine (T3)
+### P7. Remote machine (T3)
 
 1. Allowlist the `sandboxes` lifecycle calls in multi-host's remote plugin calls.
 2. SSH: second forward to the guest endpoint. Pairing link: the scoped relay.
 3. Auto placement counts a host's free sandbox quota.
 
-**Exit gate:** from a control Host on another machine (and one on macOS), create, use, stop and destroy a
-sandbox on a remote Linux host over SSH and over a pairing link; cutting the connection mid-turn loses no
-work and the thread resumes; the relay refuses a non-sandbox target.
+**Exit gate:** from a control Host on another machine, create, use, stop and destroy a sandbox on a remote
+host over SSH and over a pairing link; cutting the connection mid-turn loses no work and the thread resumes;
+the relay refuses a non-sandbox target. The relay and allowlist logic is also covered here with the fake
+provider.
 
-### P6. UI, tools, telemetry, docs
+### P8. UI, tools, telemetry, docs
 
-The Sandboxes page, chip entries, thread badge, `sandbox_doctor`; screenshots; the feature catalog with a
-span per lifecycle transition; README per package; `docs/sandboxes.md`; `complete-plan` on the finished parts.
+The Sandboxes page (reachable from the command palette and the New tab chooser), chip entries, thread badge,
+`sandbox_doctor`, the settings of sections 3.8 and 3.10; screenshots; the feature catalog with a span per
+lifecycle transition and an `onboarding` block; a pack entry; README per package; `docs/sandboxes.md`;
+`complete-plan` on the finished parts.
 
 **Exit gate:** `check:screenshots`, `features:check`, the plugin boot check and one browser journey per
-package pass.
+package pass; the page works at 390 px width with 44 px targets and keyboard only.
 
-### P7. Fast start and density
+### P9. Density
 
-1. Golden snapshot of a booted, idle guest runtime; restore instead of boot; identity and entropy reset.
-2. Warm pool of N restored sandboxes per host, bounded by quota.
-3. Pause on idle, resume on prompt.
+1. Warm pool of N ready sandboxes per host, bounded by quota.
+2. Pause on idle, resume on prompt.
 
-**Exit gate:** the budgets of section 6 are met and recorded in `docs/performance.md` with before and after.
-
-### P8. A second provider
-
-One of: Cloud Hypervisor (Linux, has virtio-fs), Apple Virtualization (local macOS), or a hosted sandbox API.
-Chosen with the user after P5.
-
-**Exit gate:** the port's contract tests and the P1 journey pass with no change outside the new package.
+**Exit gate:** the density rows of section 6 are met and recorded in `docs/performance.md` with before and
+after.
 
 ## 5. How we know it works: acceptance tests
 
-Automated, in `plugins/@dshfiles/sandboxes/tests/acceptance/`, run on a KVM machine. Each runs two sandboxes,
-A and B, on one host unless stated. A test passes only on the stated observation.
+Automated, in `plugins/@dshfiles/sandboxes/tests/acceptance/`. Each runs two sandboxes, A and B, on one host
+unless stated. A test passes only on the stated observation. Every test runs against every microVM provider.
 
 | Id | Claim | Probe | Pass when |
 | --- | --- | --- | --- |
@@ -368,40 +435,71 @@ A and B, on one host unless stated. A test passes only on the stated observation
 | L3 | Destroy is guarded | call `sandbox_destroy` without `confirmDestroy` on a sandbox with unlanded commits | refused with the commit count and how to land or export |
 | C1 | Parallelism | 8 sandboxes on one host, each running a 20-step fake-model turn at once | all 8 finish; no cross-talk in transcripts; host `host-lag` p99 under 250 ms |
 | C2 | Topologies | the phase P1 journey in topologies T1, T2 and T3 | passes in all three |
-| C3 | Provider neutrality | the port's contract suite against fake, Firecracker and the P8 provider | same suite, all pass |
+| C3 | Provider neutrality | the port's contract suite against fake, Firecracker and Apple Virtualization | same suite, all pass |
+| C4 | Operating systems | the P2 and P3 gates on Linux, on Windows in WSL2 and on macOS | pass on all three |
+| C5 | Start time | 50 creates in a row, timing create → first prompt accepted | p95 at most 2 s on each platform |
+| D1 | Sandbox is the default | create a thread with default settings on a ready host, and on a host with no provider | first runs in a sandbox; second asks, and never runs unisolated without the user's choice |
+| D2 | Retention is configurable | set `retention.stoppedHours` to 1 on a host and 0 on one sandbox | drives destroyed after 1 h and at stop respectively; the default host keeps them 24 h |
 
 Negative tests on the control plane: a wrong runtime identity behind an endpoint is refused; the scoped relay
 refuses a non-sandbox target; a sandbox on host X cannot be controlled with host Y's link credential.
+
+### 5.1 Who runs what
+
+| Where | What runs | How |
+| --- | --- | --- |
+| Here (cloud session, CI) | unit tests, the port's contract suite and the P1 journey against the fake provider, L1–L3, D1, D2, the relay and allowlist tests, UI journeys | the repository's normal checks |
+| The user's Linux machine with KVM | S1–S7, then I1–I9, C1, C5 and the Docker gate with Firecracker | `node scripts/sandbox-acceptance.mjs --provider firecracker` |
+| The user's Mac | S9, then the same suite with Apple Virtualization | `node scripts/sandbox-acceptance.mjs --provider applevz` |
+| The user's Windows machine | S8, then the suite inside WSL2 | the Firecracker command, run in WSL2 |
+
+`sandbox-acceptance.mjs` first runs `sandbox_doctor`, then the suite, and writes
+`plans/microvm-sandboxes/reports/<date>-<os>-<provider>.md`: machine facts, each test's observation and
+verdict, and the timings. A phase gate that needs a local machine is met only by a committed report. No secret
+and no personal path goes into a report; the script redacts the home directory and host name.
 
 ## 6. Budgets
 
 Measured with the existing probes, recorded in `docs/performance.md`. Revised once after P0.
 
-| Measure | Target after P2 (cold boot) | Target after P7 (snapshot) |
+| Measure | Target | Phase that must meet it |
 | --- | --- | --- |
-| Create → first prompt accepted | ≤ 15 s | ≤ 1.5 s |
-| Guest runtime settled RSS | ≤ 300 MB | ≤ 300 MB |
-| Host overhead per idle sandbox (outside guest memory) | ≤ 30 MB | ≤ 30 MB |
-| Idle sandbox CPU on the host | ≤ 0.5 % of a core | paused: 0 % |
-| Disk per sandbox before work | ≤ 50 MB (sparse overlay) | same |
-| Sandboxes on a 16 GB / 8-core host | 8 active | 8 active + 16 paused |
+| Create → first prompt accepted, p95 | ≤ 2 s on Linux, WSL2 and macOS | P2, P4, P5 |
+| Guest runtime settled RSS | ≤ 300 MB | P2 |
+| Host overhead per idle sandbox (outside guest memory) | ≤ 30 MB | P2 |
+| Idle sandbox CPU on the host | ≤ 0.5 % of a core; paused: 0 % | P2; P9 |
+| Disk per sandbox before work | ≤ 50 MB (sparse overlay) | P2 |
+| Sandboxes on a 16 GB / 8-core host | 8 active; + 16 paused | P2; P9 |
 
 ## 7. Risks
 
 | Risk | Effect | Mitigation |
 | --- | --- | --- |
-| Guest runtime too heavy | density and start time miss the budgets | minimal profile (P0 S1), snapshots (P7); exec-only fallback decided at P0 |
+| Guest runtime too heavy | density and the 2 s start miss the budgets | minimal profile, then the golden snapshot (section 3.11), both measured in P0; exec-only fallback decided at P0 |
 | Jailer needs privileges Docker will not give | T2 in-container impossible | S5 early; T3 with the Docker host as remote machine covers the need |
 | Snapshot clones share secrets or randomness | cross-sandbox leak | guest agent reseeds and re-identifies after restore; I5 and S6 check it; no secret is in the snapshot by construction (model proxy) |
 | Model proxy unsupported by a provider | key must enter the guest | fallback key, spend-capped and short-lived, flagged in the UI |
-| No KVM on the user's machine (macOS, some clouds) | no local sandbox | T3 now, P8 provider later; `sandbox_doctor` says so with the fix |
+| WSL2 has no nested virtualization on a given PC | no local sandbox on that Windows machine | S8 early; `sandbox_doctor` names the setting; T3 or the labelled container fallback otherwise |
+| Apple Virtualization lacks a needed feature (vsock, restore) on older macOS | macOS start budget or isolation missed | S9 early; minimum macOS version stated; cold boot path kept |
+| Sandbox by default surprises a user whose machine cannot run one | threads blocked | `isolation.whenUnavailable` asks with three ways forward; never a silent unisolated run |
 | multi-host changes underneath | rework | only two seams are touched: the `runtime-source` registry and the remote-call allowlist |
 | Kernel or Firecracker CVE | guest escape | pinned versions with checksums, an update policy in the provider README, jailer and seccomp always on, never run as root |
 
-## 8. Questions for the user
+## 8. Decisions taken (2026-11-14)
 
-1. Which Linux machine with KVM do we develop and test on (bare metal, or a cloud VM with nested virtualization)?
-2. Is "no network interface, proxy only" acceptable as the v1 default, with a real NIC as a later option?
-3. Should Auto placement prefer a sandbox by default, or only when the user asks?
-4. For macOS as the control machine: is T3 enough until P8, or is a local macOS provider a priority?
-5. How long should a stopped sandbox keep its drives before it is destroyed (proposed: 24 h)?
+| Topic | Decision |
+| --- | --- |
+| Operating systems | Linux, macOS and Windows through WSL2, each with a real microVM |
+| Start time | at most 2 s from create to first prompt accepted |
+| Testing | everything except the hypervisor here; hypervisor parts on the user's local machines, by committed report |
+| Network | no interface, proxy only, as the default; a real NIC is a later option |
+| Default | a new thread runs in a sandbox by default |
+| macOS | a local microVM provider is a priority (P4); a container is acceptable only as a labelled fallback |
+| Retention | 24 h by default, configurable per host and per sandbox |
+
+## 9. Still open
+
+1. The local test machines: Linux distribution and CPU architecture, macOS version and chip, Windows version.
+   They set the image architectures to build first and the minimum versions we state.
+2. When no provider is ready, is `ask` the right default for `isolation.whenUnavailable`, or should it be
+   `refuse`?
