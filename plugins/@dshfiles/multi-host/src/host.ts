@@ -20,6 +20,8 @@ import {
   fileUploadValueSchema,
   jjRepositoriesEffectSchema,
   jjThreadsApiIdentity,
+  remoteSandboxWrites,
+  sandboxesApiIdentity,
   multiHostApi,
   sessionRepositoryReads,
   sessionRepositoryWrites,
@@ -1180,6 +1182,13 @@ const handlers = Api.handlers(multiHostApi, {
   runtimePluginCall: Effect.fn('multi-host runtime plugin call')(function* (input) {
     const mutation = input.method === 'provision' || input.method === 'noFolder'
     return yield* withRuntime(input.runtimeId, gateway => gateway.pluginApi(jjThreadsApiIdentity)(input.method, input.input), { mutation }).pipe(
+      Effect.map(value => ({ ok: true as const, value })),
+      Effect.catch(error => Effect.succeed(pluginCallFailure({ error, mutation }))),
+    )
+  }),
+  runtimeSandboxCall: Effect.fn('multi-host runtime sandbox call')(function* (input) {
+    const mutation = remoteSandboxWrites.some(write => write === input.method)
+    return yield* withRuntime(input.runtimeId, gateway => gateway.pluginApi(sandboxesApiIdentity)(input.method, input.input), { mutation }).pipe(
       Effect.map(value => ({ ok: true as const, value })),
       Effect.catch(error => Effect.succeed(pluginCallFailure({ error, mutation }))),
     )

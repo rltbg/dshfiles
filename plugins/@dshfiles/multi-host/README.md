@@ -321,6 +321,12 @@ title}` for threads started here, so the sidebar and view can list them.
   plugin failures may also include JSON object details, redacted by the dshx
   caller and omitted when they exceed its 8,192-character bound. Add a call
   there only when it reads and never writes on the remote runtime.
+- **Sandboxes on a host**: `runtimeSandboxCall` (agent tool `multi_host_sandbox`) calls the
+  [`sandboxes`](../sandboxes/README.md) API of a remote runtime, and nothing else: `list`, `inspect`, `logs` and
+  `doctor` read; `create`, `start`, `stop`, `export`, `setRetention` and `destroy` change that host and never replay
+  after a lost reply. A sandbox created there is a project on that host: a thread started on that host in it runs its
+  agent loop on the host, outside the sandbox (the model key stays there), and its files and commands in the
+  sandbox.
 
 ## Compared with bb and t3code
 

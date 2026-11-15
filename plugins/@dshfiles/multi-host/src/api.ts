@@ -294,6 +294,13 @@ const sessionRepositoryMethodSchema = Schema.Literals([
  */
 export const remotePeerReadCalls = ['backlog/peerInfo', 'backlog/peerOpsSince', 'backlog/peerFiles'] as const
 const remotePeerReadCallSchema = Schema.Literals(remotePeerReadCalls)
+/** @dshfiles/sandboxes declares its API with this identity; multi-host calls it on a remote runtime (the sandbox host). */
+export const sandboxesApiIdentity = { packageId: '@dshfiles/sandboxes', apiId: 'sandboxes', version: 1 } as const
+/** Sandbox reads a manager may call on a remote runtime. */
+export const remoteSandboxReads = ['list', 'inspect', 'logs', 'doctor'] as const
+/** Sandbox changes on a remote runtime; a reply lost after sending is never treated as safe to repeat. */
+export const remoteSandboxWrites = ['create', 'start', 'stop', 'export', 'setRetention', 'destroy'] as const
+const remoteSandboxMethodSchema = Schema.Literals([...remoteSandboxReads, ...remoteSandboxWrites])
 export const jjRevisionEffectSchema = Schema.Struct({
   changeId: Schema.String,
   commitId: Schema.String,
@@ -1034,6 +1041,13 @@ const effectMultiHostApi = defineApi({
     runtimePluginCall: method({
       input: Schema.Struct({ runtimeId: idSchema, method: remotePluginMethodSchema, input: jsonValueSchema }),
       output: Schema.Union([Schema.Struct({ ok: Schema.Literal(true), value: Schema.Unknown }), failedSchema]),
+    }),
+    runtimeSandboxCall: method({
+      input: Schema.Struct({ runtimeId: idSchema, method: remoteSandboxMethodSchema, input: jsonValueSchema }),
+      output: Schema.Union([Schema.Struct({ ok: Schema.Literal(true), value: Schema.Unknown }), failedSchema]),
+      description:
+        'Call the sandboxes API of a remote host (its sandbox_* verbs: list, inspect, logs, doctor, create, start, stop, export, setRetention, destroy) and return its value or the remote failure code. A sandbox created there is a project on that host: start a thread on that host in it to work in the sandbox. Reads are safe; create, start, stop, export, setRetention and destroy change the remote host: Call only when the user asked, and destroy needs confirmDestroy: true in input.',
+      tool: { name: 'multi_host_sandbox', render: compactJson },
     }),
     runtimePeerRead: method({
       input: Schema.Struct({ runtimeId: idSchema, call: remotePeerReadCallSchema, input: jsonValueSchema }),

@@ -90,6 +90,7 @@ describe('multi-host tool exposure', () => {
       'multi_host_runtime_control',
       'multi_host_runtime_logs',
       'multi_host_runtime_status',
+      'multi_host_sandbox',
       'multi_host_save_ssh_host',
       'multi_host_session_interactions',
       'multi_host_session_jj',
@@ -396,6 +397,22 @@ describe('multi-host tool exposure', () => {
     ] as const
     for (const name of untooled) {
       expect(multiHostApi.methods[name].tool).toBeUndefined()
+    }
+  })
+})
+
+describe('runtimeSandboxCall', () => {
+  test('reaches only the sandboxes API verbs', async () => {
+    const input = multiHostApi.methods.runtimeSandboxCall.input
+    if (input === undefined) throw new Error('runtimeSandboxCall has no input schema')
+    const boundary = standard(input)
+    for (const method of ['list', 'inspect', 'logs', 'doctor', 'create', 'start', 'stop', 'export', 'setRetention', 'destroy']) {
+      const accepted = await boundary.validate({ runtimeId: 'runtime-1', method, input: {} })
+      expect('issues' in accepted && accepted.issues !== undefined).toBe(false)
+    }
+    for (const method of ['provision', 'remoteExec', 'peerFiles', 'sweep']) {
+      const refused = await boundary.validate({ runtimeId: 'runtime-1', method, input: {} })
+      expect('issues' in refused && refused.issues !== undefined).toBe(true)
     }
   })
 })
