@@ -15,6 +15,14 @@
   "main": "./dist/index.js",
   "exports": {
     ".": "./dist/index.js",
+    "./runtime": {
+      "types": "./src/native/index.ts",
+      "default": "./dist/runtime.js"
+    },
+    "./output": {
+      "types": "./src/native/output.ts",
+      "default": "./dist/output.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
