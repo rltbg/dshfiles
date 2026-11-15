@@ -8,7 +8,7 @@ import { hostService } from '@dshfiles/dshx/effect/host-context'
 import { SandboxStepFailed } from '../errors.ts'
 import { GuestEdge } from '../guest-promise.ts'
 import { SandboxPaths } from '../paths.ts'
-import type { ProviderReadiness, SandboxProvider, SandboxSpec, StartedSandbox } from '../port.ts'
+import type { ProviderReadiness, SandboxMode, SandboxProvider, SandboxSpec, StartedSandbox } from '../port.ts'
 
 const MARKER = '.directory-sandbox'
 
@@ -27,12 +27,19 @@ export class DirectoryProvider {
         cause,
       })
 
-    const describe = Effect.succeed({
-      provider: 'directory',
-      ready: true,
-      isolation: 'none',
-      detail: 'A plain folder on this machine, with no isolation.',
-    } satisfies ProviderReadiness)
+    const describe = (mode: SandboxMode): Effect.Effect<ProviderReadiness> =>
+      Effect.succeed(
+        mode === 'runtime'
+          ? {
+              provider: 'directory',
+              mode,
+              ready: false,
+              isolation: 'none',
+              detail: 'A plain folder cannot hold a DSH runtime of its own.',
+              fix: 'Use the container provider for runtime-mode sandboxes.',
+            }
+          : { provider: 'directory', mode, ready: true, isolation: 'none', detail: 'A plain folder on this machine, with no isolation.' },
+      )
 
     const create = Effect.fn('sandbox directory create')(function* (spec: SandboxSpec) {
       yield* fs.makeDirectory(spec.workspace, { recursive: true }).pipe(Effect.mapError(failed(spec, 'create')))

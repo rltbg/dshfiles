@@ -14,6 +14,9 @@ export const sandboxesSettings = defineSettings({
     image: Schema.string()
       .default('dshfiles-sandbox:1')
       .description('The sandbox image: it needs `node` (22 or later), `git` and `bash`. `sandbox_doctor` prints the command that builds the default one.'),
+    runtimeImage: Schema.string()
+      .default('dshfiles-sandbox-runtime:1')
+      .description('The image of runtime-mode sandboxes, whose DSH runs inside them: built by plugins/@dshfiles/sandboxes/image/runtime/stage.mjs.'),
     cpus: Schema.number().min(0.1).default(2).description('CPUs per sandbox.'),
     memoryMb: Schema.natural().min(128).default(2048).description('Memory per sandbox, in MB.'),
     pids: Schema.natural().min(16).default(512).description('Process limit per sandbox.'),

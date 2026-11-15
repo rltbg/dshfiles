@@ -12,7 +12,7 @@ import type {} from '@dshfiles/sandbox-seams/routes'
 import { HostEvents } from '@dshfiles/dshx/effect'
 import { hostService } from '@dshfiles/dshx/effect/host-context'
 import { KeyedMutex } from '@dshfiles/dshx/effect/keyed-mutex'
-import { Clock, Context, Duration, Effect, FileSystem, Layer, Schedule, Stream } from 'effect'
+import { Clock, Context, Duration, Effect, FileSystem, Layer, Option, Schedule, Stream } from 'effect'
 import {
   SandboxConfirmationRequired,
   SandboxProjectUnsupported,
@@ -26,6 +26,7 @@ import { SandboxPaths } from './paths.ts'
 import type { ProviderReadiness, SandboxSpec, StartedSandbox } from './port.ts'
 import { SandboxProviders } from './providers.ts'
 import { SandboxRecords, type SandboxRecord } from './records.ts'
+import { SandboxRuntimes, type StartedRuntime } from './runtime.ts'
 import { SandboxesSettings } from './settings.ts'
 import { WorkspaceRegistry } from './workspace-registry-promise.ts'
 
@@ -40,6 +41,8 @@ export interface CreateInput {
   /** The commit to start from; the repository's HEAD when omitted. */
   readonly base?: string | undefined
   readonly title?: string | undefined
+  /** `workspace` (default): this DSH runs the agent, the sandbox its files and commands. `runtime`: a DSH runs inside. */
+  readonly mode?: SandboxRecord['mode'] | undefined
 }
 
 export interface DestroyOutcome {
@@ -89,19 +92,23 @@ export class Sandboxes extends Context.Service<
       const registry = yield* WorkspaceRegistry
       const fs = yield* FileSystem.FileSystem
       const routes = yield* hostService('sandboxRoutes').pipe(Effect.orDie)
+      const runtimeService = yield* SandboxRuntimes
       const live = new Map<string, Live>()
+      /** The DSH runtimes running inside runtime-mode sandboxes. */
+      const runtimes = new Map<string, StartedRuntime>()
       /** Sandboxes whose create is under way: their resources exist before their record says they are ready. */
       const creating = new Set<string>()
       const locks = KeyedMutex.makeUnsafe<string>()
 
       const view = (record: SandboxRecord): SandboxView => ({ ...record, running: live.has(record.id) })
 
-      const specOf = Effect.fn(function* (record: Pick<SandboxRecord, 'id' | 'workspace'>) {
+      const specOf = Effect.fn(function* (record: Pick<SandboxRecord, 'id' | 'workspace' | 'mode'>) {
         const current = yield* settings.get
         const spec: SandboxSpec = {
           id: record.id,
           workspace: record.workspace,
-          image: current.image,
+          folder: paths.folder(record.id),
+          image: record.mode === 'runtime' ? current.runtimeImage : current.image,
           cpus: current.cpus,
           memoryMb: current.memoryMb,
           pids: current.pids,
@@ -122,9 +129,16 @@ export class Sandboxes extends Context.Service<
       const requireState = (record: SandboxRecord, wanted: string, allowed: readonly SandboxRecord['state'][]) =>
         allowed.includes(record.state) ? Effect.void : Effect.fail(new SandboxStateConflict({ id: record.id, state: record.state, wanted }))
 
-      /** Start the provider's instance and route its workspace. */
+      /**
+       * Start the provider's instance. In workspace mode its workspace is routed, so this DSH's tools work in it; in
+       * runtime mode nothing is routed: the agent runs inside the sandbox, never here.
+       */
       const launch = Effect.fn('sandbox launch')(function* (record: SandboxRecord) {
         const started = yield* providers.get(record.provider).start(yield* specOf(record))
+        if (record.mode === 'runtime') {
+          live.set(record.id, { started, unregister: () => undefined })
+          return
+        }
         const unregister = yield* Effect.try({
           try: () => routes.register({ id: record.id, root: record.workspace, channel: started.channel }),
           catch: cause =>
@@ -139,14 +153,28 @@ export class Sandboxes extends Context.Service<
         live.set(record.id, { started, unregister })
       })
 
-      /** Unroute and stop the instance, if one runs. */
+      /** Start the DSH runtime inside a running runtime-mode sandbox and publish its port on this machine. */
+      const bootRuntime = Effect.fn('sandbox runtime boot')(function* (record: SandboxRecord) {
+        const running = live.get(record.id)
+        if (record.mode !== 'runtime' || running === undefined) return
+        const started = yield* runtimeService.start({
+          id: record.id,
+          channel: running.started.channel,
+          workspace: record.workspace,
+          home: paths.home(record.id),
+        })
+        runtimes.set(record.id, started)
+      })
+
+      /** Stop the runtime inside, unroute and stop the instance, if one runs. */
       const halt = (id: string) =>
         Effect.suspend(() => {
+          const runtime = runtimes.get(id)
+          runtimes.delete(id)
           const running = live.get(id)
-          if (running === undefined) return Effect.void
           live.delete(id)
-          running.unregister()
-          return running.started.stop
+          running?.unregister()
+          return Effect.andThen(runtime?.stop ?? Effect.void, running?.started.stop ?? Effect.void)
         })
 
       const targetOf = (record: SandboxRecord) => {
@@ -177,7 +205,7 @@ export class Sandboxes extends Context.Service<
             state: `at the limit of ${limit} sandboxes (${existing.length} exist)`,
             wanted: 'create another; destroy one first or raise maxSandboxes',
           })
-        const provider = yield* providers.choose
+        const provider = yield* providers.choose(input.mode ?? 'workspace')
         const project = yield* git.base(input.path, input.base)
         const id = randomUUID().replaceAll('-', '').slice(0, 10)
         const now = yield* Clock.currentTimeMillis
@@ -186,6 +214,7 @@ export class Sandboxes extends Context.Service<
           id,
           title,
           provider: provider.id,
+          mode: input.mode ?? 'workspace',
           state: 'preparing',
           projectPath: input.path,
           repoRoot: project.repoRoot,
@@ -216,7 +245,10 @@ export class Sandboxes extends Context.Service<
             record = yield* save(record, { state: 'starting' })
             yield* launch(record)
             yield* git.copyIn(yield* targetOf(record))
-            const workspace = yield* registry.create(record.workspace, title).pipe(Effect.option)
+            yield* bootRuntime(record)
+            // A workspace-mode sandbox is a project of this DSH; a runtime-mode one is a project of the DSH inside it,
+            // and registering it here would invite a thread whose agent runs outside the sandbox.
+            const workspace = record.mode === 'workspace' ? yield* registry.create(record.workspace, title).pipe(Effect.option) : Option.none()
             record = yield* save(record, { state: 'ready', workspaceId: workspace._tag === 'Some' ? workspace.value.id : null })
             return view(record)
           }).pipe(
@@ -234,7 +266,9 @@ export class Sandboxes extends Context.Service<
             if (live.has(id)) return yield* new SandboxStateConflict({ id, state: 'running', wanted: 'start' })
             yield* requireState(record, 'start', ['stopped', 'failed'])
             record = yield* save(record, { state: 'starting', failure: null })
-            yield* launch(record).pipe(Effect.catchTag('SandboxStepFailed', error => failWith(record, error)))
+            yield* Effect.andThen(launch(record), bootRuntime(record)).pipe(
+              Effect.catchTag('SandboxStepFailed', error => halt(id).pipe(Effect.andThen(failWith(record, error)))),
+            )
             record = yield* save(record, { state: 'ready', stoppedAt: null })
             return view(record)
           }),
@@ -329,7 +363,7 @@ export class Sandboxes extends Context.Service<
           const ids = new Set((yield* records.list).map(record => record.id))
           for (const id of held) {
             if (ids.has(id) || creating.has(id)) continue
-            yield* provider.destroy(yield* specOf({ id, workspace: paths.workspace(id) })).pipe(Effect.ignore)
+            yield* provider.destroy(yield* specOf({ id, workspace: paths.workspace(id), mode: 'workspace' })).pipe(Effect.ignore)
           }
         }
       })

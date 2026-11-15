@@ -10,6 +10,10 @@ export class SandboxPaths extends Context.Service<
     readonly root: string
     /** The folder a sandbox serves its workspace at; on this machine it stays an empty anchor for a container. */
     readonly workspace: (id: string) => string
+    /** A sandbox's own folder: its workspace, and in runtime mode the DSH home of the runtime inside. */
+    readonly folder: (id: string) => string
+    /** The DSH home of a runtime-mode sandbox, at the same path inside the sandbox and on this machine. */
+    readonly home: (id: string) => string
     /** The git worktree on this machine where a sandbox's snapshots are checked out. */
     readonly changes: (id: string) => string
     /** A private folder for one sandbox's transfer files (bundles). */
@@ -43,6 +47,8 @@ export class SandboxPaths extends Context.Service<
         return SandboxPaths.of({
           root,
           workspace: id => `${root}/${id}/workspace`,
+          folder: id => `${root}/${id}`,
+          home: id => `${root}/${id}/home`,
           changes: id => `${root}/${id}/changes`,
           scratch: id => `${root}/${id}/transfer`,
           agentSource,

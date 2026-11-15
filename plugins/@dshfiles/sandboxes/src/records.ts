@@ -10,6 +10,11 @@ export const sandboxRecordSchema = Schema.Struct({
   title: Schema.String,
   provider: Schema.Literals(['container', 'directory']),
   state: sandboxState,
+  /**
+   * `workspace`: the user's DSH runs the agent and routes its files and commands into the sandbox (local mode B).
+   * `runtime`: a whole DSH runtime runs inside the sandbox, agent included, reached through multi-host (remote mode A).
+   */
+  mode: Schema.Literals(['workspace', 'runtime']),
   /** The folder the sandbox was created from, and the git repository and commit copied in. */
   projectPath: Schema.String,
   repoRoot: Schema.String,

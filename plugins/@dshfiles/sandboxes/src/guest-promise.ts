@@ -3,8 +3,8 @@
  * this file is the one place they become Effects.
  */
 import type { SubprocessHandle, SubprocessRuntime, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
-import { GuestChannel, GuestError } from '@dshfiles/sandbox-guest/channel'
-import type { GuestHello } from '@dshfiles/sandbox-guest/protocol'
+import { GuestChannel, GuestError, type GuestProcess as GuestProcessHandle } from '@dshfiles/sandbox-guest/channel'
+import type { GuestArguments, GuestHello, GuestOperation } from '@dshfiles/sandbox-guest/protocol'
 import { Duration, Effect } from 'effect'
 import { SandboxStepFailed } from './errors.ts'
 
@@ -128,6 +128,29 @@ export class GuestEdge {
         }),
     })
   })
+
+  /** One request on the channel; a guest failure becomes the step's error. */
+  static request<K extends GuestOperation>(id: string, step: string, channel: GuestChannel, op: K, args: GuestArguments[K]) {
+    return Effect.tryPromise({
+      try: () => channel.request(op, args),
+      catch: failure(id, step, 'Read the sandbox logs (sandbox_logs), then retry.'),
+    })
+  }
+
+  /** Start a long-lived process in the sandbox; the caller stops it with `kill`. */
+  static start(id: string, step: string, channel: GuestChannel, input: GuestArguments['spawn']): Effect.Effect<GuestProcessHandle, SandboxStepFailed> {
+    return Effect.tryPromise({
+      try: async () => {
+        const started = await channel.spawn(input)
+        started.stdin.end()
+        // Its output is diagnostics only; reading it keeps the guest from buffering it.
+        started.stdout.resume()
+        started.stderr.resume()
+        return started
+      },
+      catch: failure(id, step, 'Read the sandbox logs (sandbox_logs); the image may not be the runtime image.'),
+    })
+  }
 
   /** {@link run}, failing unless the command exits 0. */
   static readonly exec = Effect.fn('sandbox guest exec')(function* (id: string, step: string, channel: GuestChannel, input: GuestRunInput) {

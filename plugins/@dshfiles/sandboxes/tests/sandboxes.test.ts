@@ -14,6 +14,7 @@ import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import { createHostApiClient } from '@dshfiles/dshx/host'
 import { createTestHost, mountPlugin, type TestHost } from '@dshfiles/dshx/testing'
 import { apply as seams } from '@dshfiles/sandbox-seams'
+import { Schema } from 'effect'
 import { afterEach, describe, expect, it } from 'vitest'
 import { sandboxesApi } from '../src/api.ts'
 import sandboxesPlugin from '../src/host.ts'
@@ -214,7 +215,8 @@ describe('sandboxes on the directory provider', () => {
   it('reports each provider with its readiness and the step that fixes it', async () => {
     const { api } = await start({ provider: 'directory', containerEngine: 'podman' })
     const { providers } = await api.doctor({})
-    expect(providers.find(provider => provider.provider === 'directory')).toMatchObject({ ready: true, isolation: 'none' })
+    expect(providers.find(provider => provider.provider === 'directory' && provider.mode === 'workspace')).toMatchObject({ ready: true, isolation: 'none' })
+    expect(providers.find(provider => provider.provider === 'directory' && provider.mode === 'runtime')).toMatchObject({ ready: false })
     const container = providers.find(provider => provider.provider === 'container')
     expect(container?.isolation).toBe('container')
     if (container?.ready === false) expect(container.fix).toBeDefined()
@@ -252,4 +254,40 @@ describe.skipIf(!dockerReady)('sandboxes in a hardened container', () => {
     expect(spawnSync('docker', ['volume', 'inspect', `dshfiles-sandbox-${sandbox.id}`], { stdio: 'ignore' }).status).not.toBe(0)
     console.log(`container sandbox: create to ready ${Math.round(createMs)} ms, warm start ${Math.round(startMs)} ms`)
   }, 120_000)
+})
+
+const RUNTIME_IMAGE = process.env['SANDBOXES_TEST_RUNTIME_IMAGE'] ?? 'dshfiles-sandbox-runtime:1'
+const runtimeReady = spawnSync('docker', ['image', 'inspect', RUNTIME_IMAGE], { stdio: 'ignore' }).status === 0
+
+describe.skipIf(!runtimeReady)('runtime-mode sandboxes (remote mode A)', () => {
+  it('runs a whole DSH inside the hardened container and publishes it on this machine for multi-host only', async () => {
+    const { host, api } = await start({ provider: 'container', containerEngine: 'docker', runtimeImage: RUNTIME_IMAGE, syncAfterTurn: false })
+    const repo = repository()
+    const started = performance.now()
+    const sandbox = await api.create({ path: repo, mode: 'runtime' })
+    const readyMs = performance.now() - started
+    expect(sandbox).toMatchObject({ state: 'ready', mode: 'runtime', running: true, workspaceId: null })
+    // Nothing of this DSH reaches into a runtime-mode sandbox: no route, no project.
+    expect(host.ctx.sandboxRoutes.get(sandbox.id)).toBeUndefined()
+
+    const home = join(sandbox.workspace, '..', 'home')
+    const launch = Schema.decodeUnknownSync(
+      Schema.fromJsonString(Schema.Struct({ schemaVersion: Schema.Literal(1), launchUrl: Schema.String, pid: Schema.Number })),
+    )(readFileSync(join(home, 'plugins', 'multi-host', 'launch.json'), 'utf8'))
+    expect(launch.pid).toBe(process.pid)
+    const url = new URL(launch.launchUrl)
+    expect(url.hostname).toBe('127.0.0.1')
+    // The runtime answers through the forward: without the token it refuses, with it it opens a session.
+    expect((await fetch(new URL('/', url.origin))).status).toBe(401)
+    const opened = await fetch(launch.launchUrl, { redirect: 'manual' })
+    expect([200, 302, 303]).toContain(opened.status)
+
+    await api.stop({ id: sandbox.id })
+    expect(existsSync(join(home, 'plugins', 'multi-host', 'launch.json'))).toBe(false)
+    await expect(fetch(new URL('/', url.origin))).rejects.toThrow()
+    await api.start({ id: sandbox.id })
+    expect(existsSync(join(home, 'plugins', 'multi-host', 'launch.json'))).toBe(true)
+    await api.destroy({ id: sandbox.id, confirmDestroy: true })
+    console.log(`runtime sandbox: create to runtime ready ${Math.round(readyMs)} ms`)
+  }, 240_000)
 })

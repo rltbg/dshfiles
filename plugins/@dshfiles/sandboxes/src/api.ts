@@ -6,6 +6,7 @@ const id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64))
 const sandboxView = Schema.Struct({ ...sandboxRecordSchema.fields, running: Schema.Boolean })
 const readiness = Schema.Struct({
   provider: Schema.Literals(['container', 'directory']),
+  mode: Schema.Literals(['workspace', 'runtime']),
   ready: Schema.Boolean,
   isolation: Schema.Literals(['container', 'none']),
   detail: Schema.String,
@@ -50,7 +51,7 @@ export const sandboxesApi = defineApi({
           output.providers
             .map(
               provider =>
-                `${provider.provider}: ${provider.ready ? 'ready' : 'not ready'} · ${provider.detail}${provider.fix === undefined ? '' : ` · fix: ${provider.fix}`}`,
+                `${provider.provider} (${provider.mode}): ${provider.ready ? 'ready' : 'not ready'} · ${provider.detail}${provider.fix === undefined ? '' : ` · fix: ${provider.fix}`}`,
             )
             .join('\n'),
       },
@@ -60,6 +61,7 @@ export const sandboxesApi = defineApi({
         path: Schema.String.check(Schema.isMinLength(1)),
         base: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))),
         title: Schema.optional(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))),
+        mode: Schema.optional(Schema.Literals(['workspace', 'runtime'])),
       }),
       output: sandboxView,
       description:

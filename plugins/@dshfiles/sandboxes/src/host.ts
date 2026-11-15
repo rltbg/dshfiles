@@ -13,6 +13,7 @@ import { Sandboxes } from './orchestrator.ts'
 import { SandboxPaths } from './paths.ts'
 import { SandboxProviders } from './providers.ts'
 import { SandboxRecords } from './records.ts'
+import { SandboxRuntimes } from './runtime.ts'
 import { sandboxesSettings } from './settings.ts'
 import { WorkspaceRegistry } from './workspace-registry-promise.ts'
 
@@ -28,7 +29,7 @@ const platform = Layer.mergeAll(
 /** The orchestrator over a sandboxes root; tests pass a scratch one. */
 export const sandboxesLayer = (paths: Layer.Layer<SandboxPaths, never, FileSystem.FileSystem> = SandboxPaths.layer) =>
   Sandboxes.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(SandboxRecords.layer, SandboxProviders.layer, GitSync.layer)),
+    Layer.provideMerge(Layer.mergeAll(SandboxRecords.layer, SandboxProviders.layer, GitSync.layer, SandboxRuntimes.layer)),
     Layer.provideMerge(Layer.mergeAll(HostCommands.layer, Git.layer)),
     Layer.provideMerge(paths),
     Layer.provideMerge(platform),

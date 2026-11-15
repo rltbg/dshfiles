@@ -206,7 +206,60 @@
           "source": "api-dispatch"
         }
       ]
+    },
+    {
+      "id": "sandbox-runtime-mode",
+      "title": "Run a whole DSH inside a sandbox, reached through multi-host",
+      "summary": "A runtime-mode sandbox (remote mode A) runs its own DSH, agent loop included, inside the hardened container with no network. This machine only relays bytes: a loopback port forwarded over the sandbox's channel, published as a multi-host launch file at the same path as the runtime's DSH home, so multi-host registers it as a runtime of this host. Nothing of this DSH is routed into it and it is not registered as a project here.",
+      "surfaces": ["host", "integration"],
+      "surface": "infrastructure",
+      "destination": "none",
+      "currentSurface": "agent tool: sandbox_create with mode runtime; multi-host runtime registration",
+      "configuration": [
+        {
+          "key": "runtimeImage",
+          "defaultValue": "dshfiles-sandbox-runtime:1",
+          "constraints": "Built by image/runtime/stage.mjs; sandbox_doctor prints the command.",
+          "coveredBy": ["sandboxes.runtime-mode"]
+        }
+      ],
+      "states": ["absent", "booting", "published", "stopped"],
+      "failureModes": [
+        "A runtime that writes no launch file within 60 s fails the start with the recovery to rebuild the image.",
+        "Stopping removes the published launch file before the forward closes, so multi-host never reaches a dead port."
+      ],
+      "externalDependencies": [
+        {
+          "id": "container-engine",
+          "boundary": "The docker or podman CLI and the runtime image.",
+          "deterministicFake": "The test runs only where the runtime image exists (SANDBOXES_TEST_RUNTIME_IMAGE)."
+        }
+      ],
+      "verification": [
+        {
+          "kind": "unit-test",
+          "id": "sandboxes.runtime-mode",
+          "file": "plugins/@dshfiles/sandboxes/tests/sandboxes.test.ts",
+          "testName": "runs a whole DSH inside the hardened container and publishes it on this machine for multi-host only"
+        },
+        {
+          "kind": "not-applicable",
+          "id": "sandboxes.runtime-mode.no-browser-surface",
+          "reason": "The remote thread is shown by multi-host's existing remote-thread view; this feature has no surface of its own."
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "automatic",
+          "source": "api-dispatch"
+        }
+      ]
     }
   ],
-  "ioDelegation": []
+  "ioDelegation": [
+    {
+      "file": "src/forward-promise.ts",
+      "reason": "Opened by the sandbox runtime start span (Effect.fn 'sandbox runtime start' in src/runtime.ts); each relayed connection carries a multi-host request whose own client spans run on both DSH."
+    }
+  ]
 }

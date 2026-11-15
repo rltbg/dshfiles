@@ -26,6 +26,30 @@ through the sandbox's [guest channel](../sandbox-guest/README.md). The stock `re
    `refs/dshfiles/sandbox/<id>` and checked out in `~/.dsh/sandboxes/<id>/changes`, a separate git worktree. Review it
    there and land it as you would any branch: `git switch -c my-change refs/dshfiles/sandbox/<id>`.
 
+## Two modes
+
+| Mode                  | Where the agent runs                           | Reached by                                                               |
+| --------------------- | ---------------------------------------------- | ------------------------------------------------------------------------ |
+| `workspace` (default) | in your DSH; files and commands in the sandbox | the routed seams of `@dshfiles/sandbox-seams`                            |
+| `runtime`             | in a whole DSH inside the sandbox              | multi-host, through a loopback port forwarded over the sandbox's channel |
+
+A `runtime` sandbox (remote mode A) is for a sandbox host: the agent, its tools and its conversation all stay inside
+the container; the host only relays bytes. Build its image once:
+
+```sh
+pnpm exec turbo run build --filter=@dshfiles/multi-host --filter=@dshfiles/dshx
+node plugins/@dshfiles/sandboxes/image/runtime/stage.mjs .turbo/sandbox-runtime-image
+docker build -t dshfiles-sandbox-runtime:1 .turbo/sandbox-runtime-image
+```
+
+`sandbox_create` with `mode: "runtime"` copies the project in, starts the DSH inside, and publishes its launch file at
+`~/.dsh/sandboxes/<id>/home/plugins/multi-host/launch.json` on the host. Register that home as a runtime of the host in
+multi-host (Find, on the host's row), then start threads on it: they run inside the sandbox. The runtime's DSH home
+lives on the sandbox's volume, so the conversation survives a stop and start.
+
+Not done yet: the runtime has no network, so it reaches no model until the egress proxy lands (it will carry the
+model key on the host, never inside the sandbox).
+
 ## Lifecycle
 
 ```

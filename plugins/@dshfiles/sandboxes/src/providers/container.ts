@@ -10,7 +10,7 @@ import { hostService } from '@dshfiles/dshx/effect/host-context'
 import { SandboxStepFailed } from '../errors.ts'
 import { GuestEdge } from '../guest-promise.ts'
 import { SandboxPaths } from '../paths.ts'
-import type { ProviderReadiness, SandboxProvider, SandboxSpec, StartedSandbox } from '../port.ts'
+import type { ProviderReadiness, SandboxMode, SandboxProvider, SandboxSpec, StartedSandbox } from '../port.ts'
 import { SandboxesSettings } from '../settings.ts'
 
 const LABEL = 'dshfiles.sandbox'
@@ -20,6 +20,8 @@ const volumeOf = (id: string): string => `dshfiles-sandbox-${id}`
 const containerOf = (id: string): string => `dshfiles-sandbox-${id}`
 
 export const BUILD_IMAGE_HINT = 'docker build -t dshfiles-sandbox:1 plugins/@dshfiles/sandboxes/image'
+export const BUILD_RUNTIME_IMAGE_HINT =
+  'node plugins/@dshfiles/sandboxes/image/runtime/stage.mjs .turbo/sandbox-runtime-image && docker build -t dshfiles-sandbox-runtime:1 .turbo/sandbox-runtime-image'
 
 export class ContainerProvider {
   static readonly make = Effect.gen(function* () {
@@ -56,28 +58,37 @@ export class ContainerProvider {
       return output
     })
 
-    const describe: Effect.Effect<ProviderReadiness> = Effect.gen(function* () {
-      const found = yield* engine
-      if (found === undefined)
-        return {
-          provider: 'container',
-          ready: false,
-          isolation: 'container',
-          detail: 'Neither Podman nor Docker answers on this machine.',
-          fix: 'Install Podman (recommended, rootless) or Docker and start it.',
-        } satisfies ProviderReadiness
-      const image = (yield* settings.get).image
-      const inspected = yield* commands.run({ argv: [found, 'image', 'inspect', image], cwd: paths.root }).pipe(Effect.option)
-      if (inspected._tag === 'None' || inspected.value.exitCode !== 0)
-        return {
-          provider: 'container',
-          ready: false,
-          isolation: 'container',
-          detail: `${found} answers, but the image ${image} is not on this machine.`,
-          fix: image === 'dshfiles-sandbox:1' ? BUILD_IMAGE_HINT.replace('docker', found) : `${found} pull ${image}`,
-        } satisfies ProviderReadiness
-      return { provider: 'container', ready: true, isolation: 'container', detail: `${found} with the image ${image}.` } satisfies ProviderReadiness
-    })
+    const readiness = (mode: SandboxMode): Effect.Effect<ProviderReadiness> =>
+      Effect.gen(function* () {
+        const found = yield* engine
+        if (found === undefined)
+          return {
+            provider: 'container',
+            mode,
+            ready: false,
+            isolation: 'container',
+            detail: 'Neither Podman nor Docker answers on this machine.',
+            fix: 'Install Podman (recommended, rootless) or Docker and start it.',
+          } satisfies ProviderReadiness
+        const current = yield* settings.get
+        const image = mode === 'runtime' ? current.runtimeImage : current.image
+        const inspected = yield* commands.run({ argv: [found, 'image', 'inspect', image], cwd: paths.root }).pipe(Effect.option)
+        if (inspected._tag === 'None' || inspected.value.exitCode !== 0)
+          return {
+            provider: 'container',
+            mode,
+            ready: false,
+            isolation: 'container',
+            detail: `${found} answers, but the image ${image} is not on this machine.`,
+            fix:
+              image === 'dshfiles-sandbox:1'
+                ? BUILD_IMAGE_HINT.replace('docker', found)
+                : image === 'dshfiles-sandbox-runtime:1'
+                  ? BUILD_RUNTIME_IMAGE_HINT.replaceAll('docker', found)
+                  : `${found} pull ${image}`,
+          } satisfies ProviderReadiness
+        return { provider: 'container', mode, ready: true, isolation: 'container', detail: `${found} with the image ${image}.` } satisfies ProviderReadiness
+      })
 
     const create = Effect.fn('sandbox container create')(function* (spec: SandboxSpec) {
       const found = yield* engineOrFail(spec, 'create')
@@ -97,11 +108,11 @@ export class ContainerProvider {
         '--user',
         '0:0',
         '--mount',
-        `type=volume,src=${volumeOf(spec.id)},dst=/workspace`,
+        `type=volume,src=${volumeOf(spec.id)},dst=/sandbox`,
         spec.image,
-        'chown',
-        USER,
-        '/workspace',
+        'sh',
+        '-c',
+        `mkdir -p /sandbox/${spec.workspace.slice(spec.folder.length + 1)} && chown -R ${USER} /sandbox`,
       ])
     })
 
@@ -139,7 +150,7 @@ export class ContainerProvider {
         // `volume-nocopy`: the engine would otherwise copy the ownership of the image's (root's) mount point onto the
         // empty volume, and the sandbox user could not write its own workspace.
         '--mount',
-        `type=volume,src=${volumeOf(spec.id)},dst=${spec.workspace},volume-nocopy`,
+        `type=volume,src=${volumeOf(spec.id)},dst=${spec.folder},volume-nocopy`,
         '--workdir',
         spec.workspace,
         '--env',
@@ -190,7 +201,7 @@ export class ContainerProvider {
         .map(line => line.slice('dshfiles-sandbox-'.length))
     })
 
-    const provider: SandboxProvider = { id: 'container', describe, create, start, destroy, list }
+    const provider: SandboxProvider = { id: 'container', describe: readiness, create, start, destroy, list }
     return provider
   })
 }
