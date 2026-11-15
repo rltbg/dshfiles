@@ -8,9 +8,9 @@ Give each agent thread its own sandbox, in two modes chosen by where the sandbox
 - **Remote (mode A):** the sandbox runs on another machine and holds a whole DSH runtime, as Claude Code's cloud
   sessions do. The user's DSH shows the thread through multi-host.
 
-**Status:** plan; spikes S3 and S12 done. No plugin built yet.
+**Status:** plan; spikes S3, S12 and S14 done. No plugin built yet.
 
-**Resume here:** spike S14 (the channel into a container), then S13, then P1.
+**Resume here:** spike S13 (a real turn through core's tools on routed providers), then S15, then P1.
 
 | Phase | Deliverable                                                           | Where it is tested                       | State       |
 | ----- | --------------------------------------------------------------------- | ---------------------------------------- | ----------- |

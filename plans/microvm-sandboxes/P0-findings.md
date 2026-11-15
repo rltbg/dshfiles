@@ -117,12 +117,45 @@ Not covered by this spike: core's own tools running on top of these providers in
 always pass the thread's `cwd`), terminal sessions, background jobs, file watching, `editText`, and the
 guest agent.
 
+## S14. The channel: a guest agent over the container's stdio (run here, 2026-11-15)
+
+Script: [`spikes/s14-channel.mjs`](spikes/s14-channel.mjs). Run: `node plans/microvm-sandboxes/spikes/s14-channel.mjs docker`.
+Two hardened containers (`--cap-drop ALL`, `no-new-privileges`, read-only root, `--network none`, uid 1000,
+pids and memory limits), each started with `docker run -i` whose main process is a small guest agent speaking
+newline-delimited JSON over stdin and stdout. The orchestrator keeps that process as the channel.
+
+Result: **10 of 10 checks pass.**
+
+| Measure | Value |
+| --- | --- |
+| Channel round trip (ping), p50 / p99 | 0.48 / 0.98 ms |
+| File operation (write or read), p50 / p99 | 0.54 / 0.97 ms, against 86 ms for one `docker exec` (S12): about 160 times faster |
+| Two containers in parallel | about 4,000 file operations per second, no cross-talk over 2 × 1,000 |
+| Starting a process in the container through the channel, p50 | 1.9 ms |
+| Container ready (hardened, guest agent answering), warm | 207 to 229 ms; 248 to 285 ms for `docker run` plus a Node start alone |
+| Container ready, first run after the Docker daemon starts | 3.6 s (cold image layers); the warm pool or a pre-pull covers it |
+
+Checks: both guest agents ready over stdio as uid 1000; A writes and reads back; B does not see A's file; a path
+outside the workspace is refused by the guest agent; the container has no network (`ENETUNREACH`); a command runs
+in the workspace and sees the file; closing the channel stops and removes the container.
+
+What it settles:
+
+- **The stdio channel works and needs nothing else:** no published port, no mounted socket, `--network none`.
+- **The 5 ms budget is met five times over.** The protocol (JSON lines here) is not the bottleneck.
+- **Container start fits the 2 s budget** once images are warm; a cold daemon needs a pre-pull at Host start.
+- **Closing the channel cleans up** (`--rm` and stdin end), which gives crash cleanup for free when the Host dies.
+
+Still open for the guest agent: the binary form (this spike used Node from the image), terminals, watches,
+binary payloads (base64 in JSON is fine for a spike, not for large files), and the tunnelled proxy.
+
 ## Spikes still to run
 
 | Spike | Where | State |
 | --- | --- | --- |
 | S2 (A: multi-host mirrors a second local runtime) | here | not run |
 | S12 (B: one fs + subprocess provider routing two threads to two containers) | here, with Docker | seam-level routing proven; a real turn through core's tools not yet |
+| S14 (the channel over stdio) | here, with Docker | done: 10/10, 0.54 ms per file operation |
 | S4 custom model base URL | here | not run |
 | S11 hardened container runs the guest | here | container start proven; guest not yet |
 | S1, S5–S10 | Fedora 44 machine | not run |
