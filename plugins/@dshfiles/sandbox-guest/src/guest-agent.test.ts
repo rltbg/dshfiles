@@ -68,6 +68,8 @@ describe('the guest agent over a local process', () => {
     expect(second.version).not.toBe(first.version)
     expect(await channel.request('stat', { path, follow: true })).toMatchObject({ type: 'file', size: 4, version: second.version })
     expect(await channel.request('stat', { path: join(root, 'missing'), follow: true })).toBeNull()
+    symlinkSync(join(root, 'src'), join(root, 'alias'))
+    expect(await channel.request('realpath', { path: join(root, 'alias', 'new', 'b.txt') })).toEqual({ path: join(root, 'src', 'new', 'b.txt') })
     const listed = await channel.request('list', { path: join(root, 'src') })
     expect(listed.entries.map(entry => [entry.name, entry.type])).toEqual([['a.txt', 'file']])
   })

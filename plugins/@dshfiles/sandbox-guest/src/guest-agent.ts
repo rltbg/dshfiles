@@ -341,8 +341,10 @@ const operations = {
   ping: () => ({}),
   realpath: (args: Args) => {
     const path = allowed(args.string('path'))
+    // A missing target resolves through its nearest existing ancestor, as the Host's local filesystem does, so a
+    // file about to be created keeps one identity across symlinked parents.
     try {
-      return { path: realpathSync(path) }
+      return { path: physical(path) }
     } catch (error) {
       throw fsFailure(error, path)
     }

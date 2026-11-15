@@ -25,6 +25,7 @@ const empty = Schema.Struct({})
 /** The result schema of each operation the host may request. */
 export const resultSchemas = {
   ping: empty,
+  /** The physical path; a missing target resolves through its nearest existing ancestor. */
   realpath: Schema.Struct({ path: Schema.String }),
   /** A missing path answers `null`; `follow: false` describes a symlink itself. */
   stat: Schema.NullOr(statSchema),

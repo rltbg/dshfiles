@@ -71,8 +71,8 @@
       "reason": "Starts the guest agent process for the provider that asked; the provider's sandbox start span covers it."
     },
     {
-      "file": "src/channel.ts",
-      "reason": "Requests on an already open sandbox channel; each runs under the caller's span (a tool call or the sandbox lifecycle step)."
+      "file": "src/guest-agent.ts",
+      "reason": "Runs inside the sandbox as its first process, never in the Host; the Host side of each request is the caller's span (a tool call or the sandbox lifecycle step)."
     }
   ]
 }
