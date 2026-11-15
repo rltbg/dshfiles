@@ -1,0 +1,5 @@
+# Loader ids share one namespace per profile, so the scope stays in the id. The bundle needs @dshfiles/sandbox-seams,
+# which routes each sandbox's files and processes; list it before this one.
+- insert:
+    - id: dshfiles-sandboxes
+      name: '@dshfiles/sandboxes'

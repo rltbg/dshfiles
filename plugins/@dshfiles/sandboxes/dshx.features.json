@@ -1,0 +1,212 @@
+{
+  "schemaVersion": 1,
+  "kind": "bundle",
+  "features": [
+    {
+      "id": "sandbox-lifecycle",
+      "title": "Create, stop, start and destroy a sandbox a thread works in",
+      "summary": "Creates a sandbox from a git repository, registers its folder as a DSH project so a thread can start in it, routes the folder's files and commands into the sandbox through @dshfiles/sandbox-seams, and stops, starts, keeps for a retention time and destroys it, from the API and the sandbox_* agent tools.",
+      "surfaces": ["host", "integration"],
+      "surface": "infrastructure",
+      "destination": "none",
+      "currentSurface": "agent tools: sandbox_list, sandbox_inspect, sandbox_logs, sandbox_doctor, sandbox_create, sandbox_start, sandbox_stop, sandbox_export, sandbox_set_retention, sandbox_destroy",
+      "configuration": [
+        {
+          "key": "provider",
+          "defaultValue": "auto",
+          "constraints": "auto uses a container when one is ready and never the unisolated directory provider.",
+          "coveredBy": ["sandboxes.doctor"]
+        },
+        {
+          "key": "maxSandboxes",
+          "defaultValue": "8",
+          "constraints": "One more create is refused with the count.",
+          "coveredBy": ["sandboxes.refusals"]
+        },
+        {
+          "key": "stoppedHours",
+          "defaultValue": "24",
+          "constraints": "0 destroys a sandbox at stop; a sandbox can override it.",
+          "coveredBy": ["sandboxes.retention"]
+        }
+      ],
+      "states": ["preparing", "starting", "ready", "stopping", "stopped", "failed", "destroyed"],
+      "failureModes": [
+        "A folder outside a git repository, or a repository with no commit, is refused with the instruction to commit it first.",
+        "A request that does not fit the state (starting a running sandbox) is refused with its current state.",
+        "Destroying needs confirmDestroy: true; the last snapshot stays in the project repository and an edited changes worktree is kept.",
+        "After a Host restart every sandbox that was running is marked stopped and can be started again; resources with no record are removed.",
+        "A failed step is recorded with the step, the detail and the recovery."
+      ],
+      "externalDependencies": [
+        {
+          "id": "git",
+          "boundary": "The git CLI on the Host for the bundle in and the fetch back; hooks off and every object checked.",
+          "deterministicFake": "Real temporary git repositories in tests/sandboxes.test.ts."
+        }
+      ],
+      "verification": [
+        {
+          "kind": "unit-test",
+          "id": "sandboxes.create",
+          "file": "plugins/@dshfiles/sandboxes/tests/sandboxes.test.ts",
+          "testName": "creates a sandbox from a git repository, routes its workspace and registers it as a project"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandboxes.stop-start",
+          "file": "plugins/@dshfiles/sandboxes/tests/sandboxes.test.ts",
+          "testName": "stops and starts a sandbox with its files kept, and refuses a request that does not fit its state"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandboxes.destroy",
+          "file": "plugins/@dshfiles/sandboxes/tests/sandboxes.test.ts",
+          "testName": "destroys only with confirmDestroy, keeping the last snapshot in the project repository"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandboxes.retention",
+          "file": "plugins/@dshfiles/sandboxes/tests/sandboxes.test.ts",
+          "testName": "destroys a sandbox at stop when its retention is zero"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandboxes.reconcile",
+          "file": "plugins/@dshfiles/sandboxes/tests/sandboxes.test.ts",
+          "testName": "marks what was running as stopped when the plugin comes back, and starts it again"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandboxes.refusals",
+          "file": "plugins/@dshfiles/sandboxes/tests/sandboxes.test.ts",
+          "testName": "refuses a folder outside git, and more sandboxes than the limit, with a way forward"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandboxes.doctor",
+          "file": "plugins/@dshfiles/sandboxes/tests/sandboxes.test.ts",
+          "testName": "reports each provider with its readiness and the step that fixes it"
+        },
+        {
+          "kind": "not-applicable",
+          "id": "sandboxes.no-browser-surface",
+          "reason": "The plugin has no browser surface yet; its tools are exercised through the Host API in tests/sandboxes.test.ts."
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "automatic",
+          "source": "api-dispatch"
+        },
+        {
+          "kind": "automatic",
+          "source": "agent-tool"
+        }
+      ]
+    },
+    {
+      "id": "sandbox-git-sync",
+      "title": "Copy the project into a sandbox and its changes back with git",
+      "summary": "Copies one commit into the sandbox as a git bundle, and after every agent turn (or on export) fetches the sandbox's whole working tree back as a snapshot commit into refs/dshfiles/sandbox/<id>, checked out in a changes worktree on this machine; the user's own checkout is never touched.",
+      "surfaces": ["host", "integration"],
+      "surface": "infrastructure",
+      "destination": "none",
+      "currentSurface": "agent tool: sandbox_export; automatic after each turn",
+      "configuration": [
+        {
+          "key": "syncAfterTurn",
+          "defaultValue": "true",
+          "constraints": "Off copies changes back only on export and stop.",
+          "coveredBy": ["sandboxes.sync"]
+        }
+      ],
+      "states": ["not-synced", "created", "updated", "held"],
+      "failureModes": [
+        "A changes worktree with edits of its own is left as it is (held); the snapshot is still fetched.",
+        "Only git objects travel back: hooks are off and every object is checked on fetch."
+      ],
+      "externalDependencies": [
+        {
+          "id": "git",
+          "boundary": "git in the sandbox image and on the Host.",
+          "deterministicFake": "Real temporary git repositories in tests/sandboxes.test.ts."
+        }
+      ],
+      "verification": [
+        {
+          "kind": "unit-test",
+          "id": "sandboxes.sync",
+          "file": "plugins/@dshfiles/sandboxes/tests/sandboxes.test.ts",
+          "testName": "copies the changes back after a turn and on export, without touching the project checkout"
+        },
+        {
+          "kind": "not-applicable",
+          "id": "sandboxes.sandbox-git-sync.no-browser-surface",
+          "reason": "No browser surface: the Host API test drives it end to end against real git repositories and, where an engine exists, a real container."
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "automatic",
+          "source": "api-dispatch"
+        }
+      ]
+    },
+    {
+      "id": "sandbox-container-provider",
+      "title": "Run a sandbox in a hardened Docker or Podman container",
+      "summary": "Keeps each sandbox's workspace in a named volume and runs it in a container with no capabilities, no new privileges, a read-only root, no network, uid 1000 and CPU, memory and process limits; the guest agent is the container's first process and its stdin and stdout are the channel.",
+      "surfaces": ["host", "integration"],
+      "surface": "infrastructure",
+      "destination": "none",
+      "currentSurface": "settings: provider, containerEngine, image, cpus, memoryMb, pids",
+      "configuration": [
+        {
+          "key": "containerEngine",
+          "defaultValue": "auto",
+          "constraints": "auto prefers Podman, then Docker.",
+          "coveredBy": ["sandboxes.container"]
+        },
+        {
+          "key": "image",
+          "defaultValue": "dshfiles-sandbox:1",
+          "constraints": "Needs node 22+, git and bash; sandbox_doctor prints the build command.",
+          "coveredBy": ["sandboxes.container"]
+        }
+      ],
+      "states": ["absent", "volume", "running", "stopped"],
+      "failureModes": [
+        "No engine, or no image, is reported by sandbox_doctor with the command that fixes it.",
+        "A container left by a Host that died is removed before the next start."
+      ],
+      "externalDependencies": [
+        {
+          "id": "container-engine",
+          "boundary": "The docker or podman CLI.",
+          "deterministicFake": "The container test runs only where the engine and the test image exist (SANDBOXES_TEST_IMAGE)."
+        }
+      ],
+      "verification": [
+        {
+          "kind": "unit-test",
+          "id": "sandboxes.container",
+          "file": "plugins/@dshfiles/sandboxes/tests/sandboxes.test.ts",
+          "testName": "runs a thread workspace in a container with no network, as a non-root user, and copies its changes back"
+        },
+        {
+          "kind": "not-applicable",
+          "id": "sandboxes.sandbox-container-provider.no-browser-surface",
+          "reason": "No browser surface: the Host API test drives it end to end against real git repositories and, where an engine exists, a real container."
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "automatic",
+          "source": "api-dispatch"
+        }
+      ]
+    }
+  ],
+  "ioDelegation": []
+}
