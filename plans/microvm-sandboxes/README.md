@@ -8,9 +8,16 @@ Give each agent thread its own sandbox, in two modes chosen by where the sandbox
 - **Remote (mode A):** the sandbox runs on another machine and holds a whole DSH runtime, as Claude Code's cloud
   sessions do. The user's DSH shows the thread through multi-host.
 
-**Status:** plan; spikes S3, S12 and S14 done. No plugin built yet.
+**Status:** implementation started. Spikes S3, S12 and S14 done.
 
-**Resume here:** spike S13 (a real turn through core's tools on routed providers), then S15, then P1.
+| Milestone | Package | State |
+| --- | --- | --- |
+| M1 | `@dshfiles/sandbox-guest`: guest agent, stdio channel, local and container tests | done |
+| M2 | `@dshfiles/sandbox-seams`: routed `fs`, `subprocess`, `sandbox` and the route table | next |
+| M3 | `@dshfiles/sandboxes`: providers (container, directory), records, lifecycle, git sync, API, agent tools | |
+| M4 | Remote mode A | |
+
+**Resume here:** M2, `@dshfiles/sandbox-seams`.
 
 | Phase | Deliverable                                                           | Where it is tested                       | State       |
 | ----- | --------------------------------------------------------------------- | ---------------------------------------- | ----------- |

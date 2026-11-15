@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "kind": "library",
+  "features": [
+    {
+      "id": "guest-agent-channel",
+      "title": "Reach a sandbox through one channel on its own stdin and stdout",
+      "summary": "A small guest agent runs as a sandbox's first process and answers file operations and process starts over the sandbox's stdin and stdout, so the user's DSH reaches a container with no published port, no mounted socket and no docker exec per call.",
+      "surfaces": ["host", "integration"],
+      "surface": "infrastructure",
+      "destination": "none",
+      "currentSurface": "host: library",
+      "configuration": [],
+      "states": ["starting", "ready", "closed"],
+      "failureModes": [
+        "A guest agent that speaks another protocol version is refused with the instruction to rebuild the sandbox image.",
+        "When the channel closes, every pending request fails with GUEST_CLOSED and every running process reports an exit, instead of hanging.",
+        "With --confine, a path outside the workspace, through a symlink or a missing parent included, is refused with FS_SANDBOX_DENIED.",
+        "Closing the channel stops every process group in the sandbox and exits the agent, which ends a container started with --rm."
+      ],
+      "externalDependencies": [],
+      "verification": [
+        {
+          "kind": "unit-test",
+          "id": "sandbox-guest.file-operations",
+          "file": "plugins/@dshfiles/sandbox-guest/src/guest-agent.test.ts",
+          "testName": "writes, reads, stats and lists, with a version that changes on every write"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-guest.version-guards",
+          "file": "plugins/@dshfiles/sandbox-guest/src/guest-agent.test.ts",
+          "testName": "refuses a stale version, an existing file on create, and a missing file on replace"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-guest.confinement",
+          "file": "plugins/@dshfiles/sandbox-guest/src/guest-agent.test.ts",
+          "testName": "refuses paths outside its root when confined, including through a symlink and a missing parent"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-guest.processes",
+          "file": "plugins/@dshfiles/sandbox-guest/src/guest-agent.test.ts",
+          "testName": "runs a process in the given folder with its output, input and exit code"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-guest.close",
+          "file": "plugins/@dshfiles/sandbox-guest/src/guest-agent.test.ts",
+          "testName": "fails pending requests and ends the agent when the channel closes"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-guest.container",
+          "file": "plugins/@dshfiles/sandbox-guest/src/guest-agent.test.ts",
+          "testName": "serves the same operations with no network, as a non-root user, at the host path of the workspace"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "not-applicable",
+          "reason": "A library: the plugin that opens a sandbox owns the span for that unit of work and names this channel in its own catalog."
+        }
+      ]
+    }
+  ],
+  "ioDelegation": [
+    {
+      "file": "src/launch.ts",
+      "reason": "Starts the guest agent process for the provider that asked; the provider's sandbox start span covers it."
+    },
+    {
+      "file": "src/channel.ts",
+      "reason": "Requests on an already open sandbox channel; each runs under the caller's span (a tool call or the sandbox lifecycle step)."
+    }
+  ]
+}

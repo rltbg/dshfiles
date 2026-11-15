@@ -1,0 +1,35 @@
+{
+  "name": "@dshfiles/sandbox-guest",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The guest agent that runs in every sandbox, and the host end of its channel: file operations and processes over the sandbox's own stdin and stdout.",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "dshx.features.json"
+  ],
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --run build && vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "dshx": {
+    "features": "./dshx.features.json"
+  }
+}
