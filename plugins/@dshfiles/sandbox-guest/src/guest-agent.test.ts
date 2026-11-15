@@ -2,8 +2,11 @@ import { spawn, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
+import { decodeJsonSafe } from '@dshfiles/dshx/json'
+import { Schema } from 'effect'
 import { afterEach, describe, expect, it } from 'vitest'
-import { GuestError, type GuestChannel } from './channel.js'
+import { GuestChannel, GuestError } from './channel.js'
 import { GuestLauncher, type StartedGuest } from './launch.js'
 import { PROTOCOL_VERSION } from './protocol.js'
 
@@ -132,6 +135,16 @@ describe('the guest agent over a local process', () => {
     expect(exit.signal ?? exit.exitCode).not.toBe(0)
   })
 
+  it('kills a group that ignores TERM once the grace period passes', async () => {
+    const { channel, root } = local()
+    const process = await channel.spawn({ argv: ['sh', '-c', "trap '' TERM; sleep 30 & wait"], cwd: root })
+    const started = performance.now()
+    process.kill('SIGTERM', 200)
+    const exit = await process.done
+    expect(exit.signal).toBe('SIGKILL')
+    expect(performance.now() - started).toBeLessThan(5_000)
+  })
+
   it('keeps 400 concurrent requests and two processes apart', async () => {
     const { channel, root } = local()
     await Promise.all(
@@ -157,6 +170,30 @@ describe('the guest agent over a local process', () => {
     await exited
     await expect(running.done).resolves.toMatchObject({ exitCode: null })
     expect(await codeOf(guest.channel.request('ping', {}))).toBe('GUEST_CLOSED')
+  })
+})
+
+describe('the channel', () => {
+  it('keeps output that arrives in the same chunk as the spawn answer', async () => {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    const channel = new GuestChannel({ input, output })
+    input.on('data', (chunk: Buffer) => {
+      const request = decodeJsonSafe(Schema.Struct({ id: Schema.Number, op: Schema.String }), chunk.toString().trim())
+      if (request._tag === 'Failure' || request.success.op !== 'spawn') return
+      // One write: the answer, the first output and the exit, as a fast process produces them.
+      output.write(
+        `${JSON.stringify({ t: 'res', id: request.success.id, ok: true, r: { p: 7 } })}\n${JSON.stringify({ t: 'out', p: 7, f: 1, d: b64('early') })}\n${JSON.stringify({ t: 'exit', p: 7, code: 0, signal: null })}\n`,
+      )
+    })
+    const process = await channel.spawn({ argv: ['true'], cwd: '/' })
+    const stdout = new Promise<string>(resolve => {
+      let text = ''
+      process.stdout.on('data', (chunk: Buffer) => (text += chunk.toString()))
+      process.stdout.on('end', () => resolve(text))
+    })
+    await expect(process.done).resolves.toEqual({ exitCode: 0, signal: null })
+    expect(await stdout).toBe('early')
   })
 })
 

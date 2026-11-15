@@ -32,7 +32,8 @@ export interface GuestProcess {
   readonly stdout: Readable
   readonly stderr: Readable
   readonly done: Promise<{ readonly exitCode: number | null; readonly signal: NodeJS.Signals | null }>
-  kill(signal?: NodeJS.Signals): void
+  /** Signal the process group; with `graceMs`, the guest kills it that long later if it is still running. */
+  kill(signal?: NodeJS.Signals, graceMs?: number): void
 }
 
 interface Pending {
@@ -102,6 +103,14 @@ export class GuestChannel {
 
   /** Send one request and wait for its answer. */
   request<K extends GuestOperation>(op: K, args: GuestArguments[K]): Promise<GuestResult<K>> {
+    return this.send(op, args, () => undefined)
+  }
+
+  /**
+   * Send one request; `received` runs synchronously when the answer is decoded, before any later line of the same
+   * chunk is handled, which `spawn` needs so the first output of a fast process is not dropped.
+   */
+  private send<K extends GuestOperation>(op: K, args: GuestArguments[K], received: (result: GuestResult<K>) => void): Promise<GuestResult<K>> {
     if (this.failure !== undefined) return Promise.reject(this.failure)
     const id = (this.nextId += 1)
     const schema: Schema.Codec<GuestResult<K>> = resultSchemas[op]
@@ -109,8 +118,12 @@ export class GuestChannel {
       this.pending.set(id, {
         settle: result => {
           const decoded = Schema.decodeUnknownResult(schema)(result)
-          if (decoded._tag === 'Success') resolve(decoded.success)
-          else reject(new GuestError('GUEST_PROTOCOL', `the guest agent answered ${op} with an unexpected shape: ${String(decoded.failure)}`))
+          if (decoded._tag === 'Failure') {
+            reject(new GuestError('GUEST_PROTOCOL', `the guest agent answered ${op} with an unexpected shape: ${String(decoded.failure)}`))
+            return
+          }
+          received(decoded.success)
+          resolve(decoded.success)
         },
         reject,
       })
@@ -130,8 +143,7 @@ export class GuestChannel {
         resolve(exit)
       }
     })
-    const { p } = await this.request('spawn', input)
-    this.running.set(p, { stdout, stderr, settle })
+    const { p } = await this.send('spawn', input, result => this.running.set(result.p, { stdout, stderr, settle }))
     const stdin = new Writable({
       write: (chunk: Buffer, _encoding, callback) => {
         this.write({ t: 'in', p, d: Buffer.from(chunk).toString('base64') })
@@ -147,8 +159,8 @@ export class GuestChannel {
       stdout,
       stderr,
       done,
-      kill: (signal = 'SIGTERM') => {
-        if (this.running.has(p)) this.request('kill', { p, signal }).catch(() => undefined)
+      kill: (signal = 'SIGTERM', graceMs) => {
+        if (this.running.has(p)) this.request('kill', graceMs === undefined ? { p, signal } : { p, signal, graceMs }).catch(() => undefined)
       },
     }
   }

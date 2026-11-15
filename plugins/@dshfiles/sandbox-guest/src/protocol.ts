@@ -61,7 +61,8 @@ export interface GuestArguments {
   readonly rename: { readonly from: string; readonly to: string }
   readonly which: { readonly command: string }
   readonly spawn: { readonly argv: readonly string[]; readonly cwd: string; readonly env?: Readonly<Record<string, string>> }
-  readonly kill: { readonly p: number; readonly signal: string }
+  /** With `graceMs`, the group is sent `SIGKILL` that long after `signal` if it is still running. */
+  readonly kill: { readonly p: number; readonly signal: string; readonly graceMs?: number }
 }
 
 export type GuestResult<K extends GuestOperation> = (typeof resultSchemas)[K]['Type']

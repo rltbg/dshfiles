@@ -388,7 +388,16 @@ const operations = {
   which: (args: Args) => ({ path: which(args.string('command')) }),
   spawn: (args: Args) => startProcess(args.strings('argv'), allowed(args.string('cwd')), args.optionalStringMap('env')),
   kill: (args: Args) => {
-    signalGroup(args.number('p'), args.optionalString('signal') ?? 'SIGTERM')
+    const p = args.number('p')
+    signalGroup(p, args.optionalString('signal') ?? 'SIGTERM')
+    // Escalation lives here, next to the process, so a group that ignores TERM is still killed if the Host goes away.
+    const graceMs = args.optionalNumber('graceMs')
+    if (graceMs !== undefined) {
+      const child = processes.get(p)
+      setTimeout(() => {
+        if (child !== undefined && processes.get(p) === child) signalGroup(p, 'SIGKILL')
+      }, graceMs).unref()
+    }
     return {}
   },
 } satisfies Record<string, (args: Args) => object | null>
