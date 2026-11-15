@@ -1046,7 +1046,7 @@ const effectMultiHostApi = defineApi({
       input: Schema.Struct({ runtimeId: idSchema, method: remoteSandboxMethodSchema, input: jsonValueSchema }),
       output: Schema.Union([Schema.Struct({ ok: Schema.Literal(true), value: Schema.Unknown }), failedSchema]),
       description:
-        'Call the sandboxes API of a remote host (its sandbox_* verbs: list, inspect, logs, doctor, create, start, stop, export, setRetention, destroy) and return its value or the remote failure code. A sandbox created there is a project on that host: start a thread on that host in it to work in the sandbox. Reads are safe; create, start, stop, export, setRetention and destroy change the remote host: Call only when the user asked, and destroy needs confirmDestroy: true in input.',
+        'Call the sandboxes API of a remote host (its sandbox_* verbs: list, inspect, logs, doctor, create, start, stop, export, setRetention, destroy) and return its value or the remote failure code. Reads are safe; create, start, stop, export, setRetention and destroy change the remote host: Call only when the user asked, and destroy needs confirmDestroy: true in input.',
       tool: { name: 'multi_host_sandbox', render: compactJson },
     }),
     runtimePeerRead: method({

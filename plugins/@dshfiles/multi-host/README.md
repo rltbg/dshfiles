@@ -324,9 +324,8 @@ title}` for threads started here, so the sidebar and view can list them.
 - **Sandboxes on a host**: `runtimeSandboxCall` (agent tool `multi_host_sandbox`) calls the
   [`sandboxes`](../sandboxes/README.md) API of a remote runtime, and nothing else: `list`, `inspect`, `logs` and
   `doctor` read; `create`, `start`, `stop`, `export`, `setRetention` and `destroy` change that host and never replay
-  after a lost reply. A sandbox created there is a project on that host: a thread started on that host in it runs its
-  agent loop on the host, outside the sandbox (the model key stays there), and its files and commands in the
-  sandbox.
+  after a lost reply. This manages sandboxes on that host; it does not start threads in them. In remote mode a thread
+  runs inside its sandbox, with its own DSH runtime (see the sandboxes plan, mode A).
 
 ## Compared with bb and t3code
 
