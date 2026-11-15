@@ -155,8 +155,12 @@ const send = (message: Outgoing): void => {
 }
 
 const versionOf = (info: BigIntStats): string => `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`
-const typeOf = (info: BigIntStats): StatResult['type'] =>
-  info.isFile() ? 'file' : info.isDirectory() ? 'directory' : info.isSymbolicLink() ? 'symlink' : 'other'
+const typeOf = (info: BigIntStats): StatResult['type'] => {
+  if (info.isFile()) return 'file'
+  if (info.isDirectory()) return 'directory'
+  if (info.isSymbolicLink()) return 'symlink'
+  return 'other'
+}
 
 /** The errno code of a Node filesystem error (`ENOENT`, `EACCES`, …). */
 const errnoCode = (error: unknown): string | undefined =>
@@ -420,6 +424,9 @@ process.stdin.on('data', (chunk: string) => {
     pending = pending.slice(newline + 1)
     if (line.trim() !== '') {
       try {
+        // The agent cannot import the repository's validated JSON decoder: it runs alone in images that hold nothing
+        // of dshfiles. Args.from and its accessors are its validation, field by field.
+        // ast-grep-ignore: no-direct-json-parse
         handle(Args.from(JSON.parse(line)))
       } catch {
         // A line that is not a well-formed message is ignored; the host only sends protocol lines.

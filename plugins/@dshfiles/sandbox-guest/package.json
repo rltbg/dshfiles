@@ -11,11 +11,18 @@
     "dshx.features.json"
   ],
   "type": "module",
-  "types": "./src/index.ts",
   "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "default": "./dist/index.js"
+    "./channel": {
+      "types": "./src/channel.ts",
+      "default": "./dist/channel.js"
+    },
+    "./launch": {
+      "types": "./src/launch.ts",
+      "default": "./dist/launch.js"
+    },
+    "./protocol": {
+      "types": "./src/protocol.ts",
+      "default": "./dist/protocol.js"
     },
     "./package.json": "./package.json"
   },
@@ -23,6 +30,10 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "node --run build && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@dshfiles/dshx": "workspace:*",
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

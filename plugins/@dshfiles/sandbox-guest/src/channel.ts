@@ -3,13 +3,17 @@
  * output and exit arrive as messages on the same stream. A provider gives it the sandbox's stdin and stdout.
  */
 import { PassThrough, Writable, type Readable } from 'node:stream'
+import { decodeJsonSafe } from '@dshfiles/dshx/json'
+import { Schema } from 'effect'
 import {
   PROTOCOL_VERSION,
+  guestMessageSchema,
+  resultSchemas,
+  type GuestArguments,
   type GuestErrorCode,
   type GuestHello,
   type GuestOperation,
-  type GuestOperations,
-  type GuestToHost,
+  type GuestResult,
   type HostToGuest,
 } from './protocol.js'
 
@@ -31,11 +35,9 @@ export interface GuestProcess {
   kill(signal?: NodeJS.Signals): void
 }
 
-/** Any operation's result, as the guest agent sends it. */
-type GuestResult = GuestOperations[GuestOperation]['result']
-
 interface Pending {
-  readonly resolve: (value: GuestResult) => void
+  /** Decodes the response's result with the requested operation's schema, then settles the request. */
+  readonly settle: (result: Schema.Schema.Type<typeof Schema.Unknown>) => void
   readonly reject: (error: Error) => void
 }
 
@@ -99,19 +101,25 @@ export class GuestChannel {
   }
 
   /** Send one request and wait for its answer. */
-  request<K extends GuestOperation>(op: K, args: GuestOperations[K]['args']): Promise<GuestOperations[K]['result']> {
+  request<K extends GuestOperation>(op: K, args: GuestArguments[K]): Promise<GuestResult<K>> {
     if (this.failure !== undefined) return Promise.reject(this.failure)
     const id = (this.nextId += 1)
+    const schema: Schema.Codec<GuestResult<K>> = resultSchemas[op]
     return new Promise((resolve, reject) => {
-      // SAFETY: the guest agent answers request `id` with the result shape of the operation it was sent (protocol.ts);
-      // guest-agent.test.ts runs the real agent through every operation.
-      this.pending.set(id, { resolve: value => resolve(value as GuestOperations[K]['result']), reject })
+      this.pending.set(id, {
+        settle: result => {
+          const decoded = Schema.decodeUnknownResult(schema)(result)
+          if (decoded._tag === 'Success') resolve(decoded.success)
+          else reject(new GuestError('GUEST_PROTOCOL', `the guest agent answered ${op} with an unexpected shape: ${String(decoded.failure)}`))
+        },
+        reject,
+      })
       this.write({ t: 'req', id, op, a: args })
     })
   }
 
   /** Start a process in the sandbox. Its streams behave like a local child process's. */
-  async spawn(input: GuestOperations['spawn']['args']): Promise<GuestProcess> {
+  async spawn(input: GuestArguments['spawn']): Promise<GuestProcess> {
     const stdout = new PassThrough()
     const stderr = new PassThrough()
     let settle: Running['settle'] = () => undefined
@@ -157,15 +165,10 @@ export class GuestChannel {
   }
 
   private receive(line: string, greet: (hello: GuestHello) => void, refuse: (error: Error) => void): void {
-    let message: GuestToHost
-    try {
-      // SAFETY: the guest agent writes only the GuestToHost shapes of protocol.ts on this stream, and a line that is
-      // not one of them falls through the switch below without effect.
-      message = JSON.parse(line) as GuestToHost
-    } catch {
-      // Output that is not a protocol line (a stray print from the image's entrypoint) is ignored.
-      return
-    }
+    const decoded = decodeJsonSafe(guestMessageSchema, line)
+    // Output that is not a protocol line (a stray print from the image's entrypoint) is ignored.
+    if (decoded._tag === 'Failure') return
+    const message = decoded.success
     switch (message.t) {
       case 'hello':
         if (message.v !== PROTOCOL_VERSION) {
@@ -183,7 +186,7 @@ export class GuestChannel {
         const waiter = this.pending.get(message.id)
         if (waiter === undefined) return
         this.pending.delete(message.id)
-        if (message.ok) waiter.resolve(message.r)
+        if (message.ok) waiter.settle(message.r)
         else waiter.reject(new GuestError(message.e.code, message.e.message))
         return
       }
@@ -197,8 +200,7 @@ export class GuestChannel {
         const target = this.running.get(message.p)
         if (target === undefined) return
         this.running.delete(message.p)
-        // SAFETY: the guest agent reports the exit signal name Node gave it, which is a NodeJS.Signals value or null.
-        target.settle({ exitCode: message.code, signal: message.signal as NodeJS.Signals | null })
+        target.settle({ exitCode: message.code, signal: message.signal })
       }
     }
   }
