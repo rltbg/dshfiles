@@ -1,0 +1,11 @@
+# One provider per seam, so the three stock rows give way to this bundle's row. Each routed class extends the class
+# it replaces and calls it unchanged for a thread with no sandbox, so a profile with no open sandbox behaves as before.
+- id: fs-sandbox
+  disabled: true
+- id: sandbox
+  disabled: true
+- id: dshfiles-subprocess-local
+  disabled: true
+- insert:
+    - id: dshfiles-sandbox-seams
+      name: '@dshfiles/sandbox-seams'

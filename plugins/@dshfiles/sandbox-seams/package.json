@@ -1,0 +1,70 @@
+{
+  "name": "@dshfiles/sandbox-seams",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Routes a sandboxed thread's file operations and processes into its sandbox through the native ctx.fs, ctx.subprocess and ctx.sandbox seams, and leaves every other thread on the stock local providers.",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README.md",
+    "dshx.features.json"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./routes": {
+      "types": "./src/routes.ts",
+      "default": "./dist/routes.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "dshx build",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:boot": "node ../../../tooling/dshx/scripts/boot-check-web.mjs --plugin"
+  },
+  "dependencies": {
+    "@dshfiles/sandbox-guest": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "catalog:",
+    "@deepseek-ai/dsh": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-fs": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-fs-local": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-fs-patch": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-fs-sandbox": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-sandbox": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-sandbox-local": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-subprocess": "catalog:",
+    "@dshfiles/dshx": "workspace:*",
+    "@dshfiles/subprocess-local": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh": ">=0.2.0-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-fs": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-fs-local": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-fs-patch": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-fs-sandbox": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-sandbox": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-sandbox-local": ">=0.2.2-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-subprocess": ">=0.2.2-rc.2 <0.3.0-0",
+    "@dshfiles/subprocess-local": "0.1.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dshx": {
+    "features": "./dshx.features.json"
+  }
+}

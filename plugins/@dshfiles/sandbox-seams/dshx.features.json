@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "kind": "bundle",
+  "features": [
+    {
+      "id": "routed-seams",
+      "title": "Route a sandboxed thread's files and commands into its sandbox",
+      "summary": "Replaces the stock ctx.fs, ctx.subprocess and ctx.sandbox providers with subclasses that send any path or working folder inside an open sandbox's workspace to that sandbox's guest agent, so the native read, write, edit, apply_patch and bash tools work in a sandbox unchanged, and calls the stock providers for every other thread.",
+      "surfaces": ["host", "integration"],
+      "surface": "infrastructure",
+      "destination": "none",
+      "currentSurface": "host: no UI",
+      "configuration": [],
+      "states": ["no sandbox routed", "routed", "sandbox gone"],
+      "failureModes": [
+        "A path outside the asking thread's sandbox, or inside a sandbox the asking thread does not run in, is refused with FS_SANDBOX_DENIED and a way forward.",
+        "The Host home folder (~) is refused from a sandboxed thread.",
+        "A file changed inside the sandbox between read and write fails as FS_STALE_VERSION instead of being overwritten.",
+        "A file or process in a sandbox that is no longer running fails with the instruction to start it again from the Sandboxes page or the sandbox_start tool.",
+        "Interactive terminals and subprocess control channels are refused in a sandbox with a way forward; watching a sandboxed file is refused and the caller reads it again."
+      ],
+      "externalDependencies": [],
+      "verification": [
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.resolve",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "resolves a sandbox path to a routed target and leaves a Host path to the stock provider"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.boundary",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "refuses a path across a sandbox boundary in either direction, and the Host home from a sandbox"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.file-operations",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "writes, reads, lists, edits, patches, moves and deletes inside the sandbox with version guards"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.text-semantics",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "keeps CRLF line endings on edit and refuses binary, oversized and stale content as the local provider does"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.policy-fence",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "fences writes by the per-call policy inside the sandbox"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.sandbox-gone",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "reports a sandbox that is gone with a way to start it again"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.process-routing",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "runs a sandboxed command through the guest agent and a Host command locally"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.process-stdio",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "feeds stdin, reports exit codes and stderr, and resolves a Host-resolved program in the sandbox"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.process-stop",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "streams a pipe-mode process and stops its whole group on terminate and on abort"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.process-refusals",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "refuses a terminal and a control channel in a sandbox with a way forward"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.process-channel-closed",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "fails a process with a recovery when its sandbox channel has closed"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.confine",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "passes a sandboxed workspace command through unchanged and sends others to the local runner chain"
+        },
+        {
+          "kind": "unit-test",
+          "id": "sandbox-seams.routes",
+          "file": "plugins/@dshfiles/sandbox-seams/tests/seams.test.ts",
+          "testName": "refuses overlapping roots and forgets a route when it is unregistered"
+        },
+        {
+          "kind": "not-applicable",
+          "id": "sandbox-seams.no-browser-surface",
+          "reason": "The bundle replaces three Host services and renders no UI; the sandbox orchestrator's journey drives a real turn through it."
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "not-applicable",
+          "reason": "The providers other plugins and tools call through: each tool call already has its agent-tool span, and the sandbox orchestrator spans the sandbox lifecycle. A span per routed file operation would duplicate the tool span."
+        }
+      ]
+    }
+  ],
+  "ioDelegation": [
+    {
+      "file": "src/routed-subprocess.ts",
+      "reason": "Processes started for the calling tool or plugin, which opens the span for its own command; a runtime span would duplicate it, as in @dshfiles/subprocess-local."
+    }
+  ]
+}
