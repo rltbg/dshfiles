@@ -46,7 +46,9 @@ In our own plugins (grep over `plugins/@dshfiles/*/src`, Host code, tests and ve
 - Known bypasses of the seams for project content: `fff-search` (grep/glob from a host-side index),
   `jj-integration` and `project-checks` (they spawn processes directly), `pull-requests`.
 
-**What this changes.** The plan's section 3.1 dismissed "exec-only" because it "needs forks of every tool". That
+**Decision (2026-11-15): architecture B.** See the README, section 2.
+
+**What this changed.** The plan's section 3.1 dismissed "exec-only" because it "needs forks of every tool". That
 is wrong: replacing `ctx.fs`, `ctx.subprocess` and `ctx.sandbox` is the route core documents, and the main file
 and shell tools already go through them. The two architectures must be compared on evidence:
 
