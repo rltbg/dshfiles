@@ -12,6 +12,7 @@
   ],
   "type": "module",
   "exports": {
+    "./agent": "./dist/guest-agent.js",
     "./channel": {
       "types": "./src/channel.ts",
       "default": "./dist/channel.js"
