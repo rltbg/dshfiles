@@ -40,6 +40,8 @@ export const resultSchemas = {
   which: Schema.Struct({ path: Schema.NullOr(Schema.String) }),
   /** A process started in its own process group; output and exit arrive as `out` and `exit` messages for `p`. */
   spawn: Schema.Struct({ p: Schema.Number }),
+  /** A TCP connection to a loopback port in the sandbox; its bytes arrive as `sock` messages for `c`. */
+  connect: Schema.Struct({ c: Schema.Number }),
   /** Signals a process group started by `spawn`. */
   kill: empty,
 }
@@ -63,6 +65,7 @@ export interface GuestArguments {
   readonly spawn: { readonly argv: readonly string[]; readonly cwd: string; readonly env?: Readonly<Record<string, string>> }
   /** With `graceMs`, the group is sent `SIGKILL` that long after `signal` if it is still running. */
   readonly kill: { readonly p: number; readonly signal: string; readonly graceMs?: number }
+  readonly connect: { readonly port: number }
 }
 
 export type GuestResult<K extends GuestOperation> = (typeof resultSchemas)[K]['Type']
@@ -130,9 +133,13 @@ export const guestMessageSchema = Schema.Union([
   }),
   Schema.Struct({ t: Schema.Literal('out'), p: Schema.Number, f: Schema.Literals([1, 2]), d: Schema.String }),
   Schema.Struct({ t: Schema.Literal('exit'), p: Schema.Number, code: Schema.NullOr(Schema.Number), signal: Schema.NullOr(signalName) }),
+  Schema.Struct({ t: Schema.Literal('sock'), c: Schema.Number, d: Schema.String }),
+  Schema.Struct({ t: Schema.Literal('sock-end'), c: Schema.Number, e: Schema.optional(Schema.String) }),
 ])
 
 export type HostToGuest =
   | { readonly t: 'req'; readonly id: number; readonly op: GuestOperation; readonly a: GuestArguments[GuestOperation] }
   | { readonly t: 'in'; readonly p: number; readonly d: string }
   | { readonly t: 'in-end'; readonly p: number }
+  | { readonly t: 'sock'; readonly c: number; readonly d: string }
+  | { readonly t: 'sock-end'; readonly c: number }

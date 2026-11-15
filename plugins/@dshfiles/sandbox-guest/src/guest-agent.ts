@@ -10,6 +10,7 @@
  * used when the agent runs on the host itself, as the directory provider does).
  */
 import { spawn, type ChildProcess } from 'node:child_process'
+import { connect as connectTcp, type Socket } from 'node:net'
 import {
   closeSync,
   fsyncSync,
@@ -149,6 +150,8 @@ type Outgoing =
   | { readonly t: 'res'; readonly id: number; readonly ok: false; readonly e: { readonly code: string; readonly message: string } }
   | { readonly t: 'out'; readonly p: number; readonly f: 1 | 2; readonly d: string }
   | { readonly t: 'exit'; readonly p: number; readonly code: number | null; readonly signal: string | null }
+  | { readonly t: 'sock'; readonly c: number; readonly d: string }
+  | { readonly t: 'sock-end'; readonly c: number; readonly e?: string }
 
 const send = (message: Outgoing): void => {
   process.stdout.write(`${JSON.stringify(message)}\n`)
@@ -337,6 +340,35 @@ const signalGroup = (p: number, signal: string): void => {
   }
 }
 
+const sockets = new Map<number, Socket>()
+let nextSocket = 0
+
+/**
+ * Open a TCP connection to a loopback port inside the sandbox; its bytes travel as `sock` messages. This is how the
+ * host reaches a server running in the sandbox (a DSH runtime, a dev server) with no published port.
+ */
+const openSocket = (port: number) => {
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) throw bad(`invalid port ${port}`)
+  const c = (nextSocket += 1)
+  const socket = connectTcp({ host: '127.0.0.1', port })
+  sockets.set(c, socket)
+  socket.on('data', (chunk: Buffer) => send({ t: 'sock', c, d: chunk.toString('base64') }))
+  let ended = false
+  const end = (error?: Error) => {
+    if (ended) return
+    ended = true
+    sockets.delete(c)
+    send(error === undefined ? { t: 'sock-end', c } : { t: 'sock-end', c, e: error.message })
+  }
+  socket.on('end', () => end())
+  socket.on('close', () => end())
+  socket.on('error', error => {
+    end(error)
+    socket.destroy()
+  })
+  return { c }
+}
+
 const operations = {
   ping: () => ({}),
   realpath: (args: Args) => {
@@ -387,6 +419,7 @@ const operations = {
   },
   which: (args: Args) => ({ path: which(args.string('command')) }),
   spawn: (args: Args) => startProcess(args.strings('argv'), allowed(args.string('cwd')), args.optionalStringMap('env')),
+  connect: (args: Args) => openSocket(args.number('port')),
   kill: (args: Args) => {
     const p = args.number('p')
     signalGroup(p, args.optionalString('signal') ?? 'SIGTERM')
@@ -411,6 +444,13 @@ const handle = (message: Args): void => {
     if (child === undefined) return
     if (kind === 'in') child.stdin?.write(Buffer.from(message.string('d'), 'base64'))
     else child.stdin?.end()
+    return
+  }
+  if (kind === 'sock' || kind === 'sock-end') {
+    const socket = sockets.get(message.number('c'))
+    if (socket === undefined) return
+    if (kind === 'sock') socket.write(Buffer.from(message.string('d'), 'base64'))
+    else socket.end()
     return
   }
   if (kind !== 'req') return
@@ -448,6 +488,7 @@ process.stdin.on('data', (chunk: string) => {
 })
 // The host closing the channel ends the sandbox: stop every process group, then exit.
 process.stdin.on('end', () => {
+  for (const socket of sockets.values()) socket.destroy()
   for (const p of processes.keys()) {
     try {
       signalGroup(p, 'SIGKILL')

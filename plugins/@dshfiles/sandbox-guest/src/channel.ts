@@ -2,7 +2,7 @@
  * The host end of the channel to a guest agent: requests matched to responses by id, and processes whose
  * output and exit arrive as messages on the same stream. A provider gives it the sandbox's stdin and stdout.
  */
-import { PassThrough, Writable, type Readable } from 'node:stream'
+import { Duplex, PassThrough, Writable, type Readable } from 'node:stream'
 import { decodeJsonSafe } from '@dshfiles/dshx/json'
 import { Schema } from 'effect'
 import {
@@ -18,9 +18,9 @@ import {
 } from './protocol.js'
 
 export class GuestError extends Error {
-  readonly code: GuestErrorCode | 'GUEST_CLOSED' | 'GUEST_PROTOCOL'
+  readonly code: GuestErrorCode | 'GUEST_CLOSED' | 'GUEST_PROTOCOL' | 'GUEST_CONNECTION_FAILED'
 
-  constructor(code: GuestErrorCode | 'GUEST_CLOSED' | 'GUEST_PROTOCOL', message: string) {
+  constructor(code: GuestErrorCode | 'GUEST_CLOSED' | 'GUEST_PROTOCOL' | 'GUEST_CONNECTION_FAILED', message: string) {
     super(message)
     this.name = 'GuestError'
     this.code = code
@@ -60,6 +60,7 @@ export class GuestChannel {
   readonly closed: Promise<void>
   private readonly pending = new Map<number, Pending>()
   private readonly running = new Map<number, Running>()
+  private readonly sockets = new Map<number, Duplex>()
   private nextId = 0
   private failure: GuestError | undefined
   private buffered = ''
@@ -165,6 +166,31 @@ export class GuestChannel {
     }
   }
 
+  /**
+   * Open a TCP connection to a loopback port inside the sandbox, as a stream. A server in the sandbox (its DSH
+   * runtime, a dev server) is reached this way with no published port.
+   */
+  async connect(port: number): Promise<Duplex> {
+    let c = 0
+    const socket = new Duplex({
+      read: () => undefined,
+      write: (chunk: Buffer, _encoding, callback) => {
+        this.write({ t: 'sock', c, d: Buffer.from(chunk).toString('base64') })
+        callback()
+      },
+      final: callback => {
+        this.write({ t: 'sock-end', c })
+        callback()
+      },
+    })
+    await this.send('connect', { port }, result => {
+      c = result.c
+      this.sockets.set(c, socket)
+    })
+    socket.once('close', () => this.sockets.delete(c))
+    return socket
+  }
+
   /** End the channel: the guest agent stops every process and exits, and the sandbox with it. */
   close(): Promise<void> {
     if (!this.io.input.writableEnded) this.io.input.end()
@@ -208,6 +234,18 @@ export class GuestChannel {
         ;(message.f === 1 ? target.stdout : target.stderr).write(Buffer.from(message.d, 'base64'))
         return
       }
+      case 'sock': {
+        this.sockets.get(message.c)?.push(Buffer.from(message.d, 'base64'))
+        return
+      }
+      case 'sock-end': {
+        const socket = this.sockets.get(message.c)
+        if (socket === undefined) return
+        this.sockets.delete(message.c)
+        if (message.e === undefined) socket.push(null)
+        else socket.destroy(new GuestError('GUEST_CONNECTION_FAILED', message.e))
+        return
+      }
       case 'exit': {
         const target = this.running.get(message.p)
         if (target === undefined) return
@@ -223,6 +261,8 @@ export class GuestChannel {
     for (const waiter of this.pending.values()) waiter.reject(error)
     this.pending.clear()
     for (const process of this.running.values()) process.settle({ exitCode: null, signal: 'SIGKILL' })
+    for (const socket of this.sockets.values()) socket.destroy(error)
+    this.sockets.clear()
     this.running.clear()
   }
 }

@@ -160,6 +160,30 @@ describe('the guest agent over a local process', () => {
     expect(b.stdout).toBe('B1\nB2\nB3\n')
   })
 
+  it('tunnels a TCP connection to a server listening on loopback in the sandbox, and reports a closed port', async () => {
+    const { channel, root } = local()
+    const server = await channel.spawn({
+      argv: [
+        process.execPath,
+        '-e',
+        "require('node:http').createServer((q,r)=>r.end('inside '+q.url)).listen(0,'127.0.0.1',function(){console.log(this.address().port)})",
+      ],
+      cwd: root,
+    })
+    const port = await new Promise<number>(resolve => server.stdout.once('data', (chunk: Buffer) => resolve(Number(chunk.toString().trim()))))
+    const socket = await channel.connect(port)
+    const reply = new Promise<string>(resolve => {
+      let text = ''
+      socket.on('data', (chunk: Buffer) => (text += chunk.toString()))
+      socket.on('end', () => resolve(text))
+    })
+    socket.end('GET /hello HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n')
+    expect(await reply).toMatch(/^HTTP\/1\.1 200[\s\S]*inside \/hello$/u)
+    server.kill('SIGKILL')
+    const refused = await channel.connect(1)
+    await expect(new Promise((_, reject) => refused.on('error', reject))).rejects.toMatchObject({ code: 'GUEST_CONNECTION_FAILED' })
+  })
+
   it('fails pending requests and ends the agent when the channel closes', async () => {
     const root = scratch()
     const guest = GuestLauncher.startLocal({ root })
