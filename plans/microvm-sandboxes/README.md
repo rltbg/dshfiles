@@ -8,21 +8,21 @@ Give each agent thread its own sandbox, in two modes chosen by where the sandbox
 - **Remote (mode A):** the sandbox runs on another machine and holds a whole DSH runtime, as Claude Code's cloud
   sessions do. The user's DSH shows the thread through multi-host.
 
-**Status:** M1 to M4 done and tested here (2026-11-15); the next work is defaults, egress and the UI.
+**Status:** M1 to M3 done and tested here (2026-11-15); M4 runs and is reached, model egress is next.
 
-| Milestone | Package                                                                                                 | State            |
-| --------- | ------------------------------------------------------------------------------------------------------- | ---------------- |
-| M1        | `@dshfiles/sandbox-guest`: guest agent, stdio channel, local and container tests                        | done             |
-| M2        | `@dshfiles/sandbox-seams`: routed `fs`, `subprocess`, `sandbox` and the route table                     | done             |
-| M3        | `@dshfiles/sandboxes`: providers (container, directory), records, lifecycle, git sync, API, agent tools | done             |
-| M4        | Remote mode: `multi_host_sandbox` reaches a host's sandboxes; threads there run in them                 | done (see below) |
-| M5        | Every new thread in a sandbox by default, with the "Not sandboxed" fallback (3.11)                      | next             |
-| M6        | Egress allowlist through the channel (3.5), so installs work with `--network none`                      |                  |
-| M7        | Sandboxes page and thread badge (P9), screenshots                                                       |                  |
-| M8        | Seam coverage test C6 (3.7): every web-profile tool routed, host-only or refused                        |                  |
-| M9        | microsandbox provider and the Fedora evaluation (P6, P7)                                                | Fedora           |
+| Milestone | Package                                                                                                 | State                                                  |
+| --------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| M1        | `@dshfiles/sandbox-guest`: guest agent, stdio channel, local and container tests                        | done                                                   |
+| M2        | `@dshfiles/sandbox-seams`: routed `fs`, `subprocess`, `sandbox` and the route table                     | done                                                   |
+| M3        | `@dshfiles/sandboxes`: providers (container, directory), records, lifecycle, git sync, API, agent tools | done                                                   |
+| M4        | Remote mode A: a DSH runtime inside each sandbox, reached by multi-host (S15, S16)                      | in progress: runs and is reached; model egress missing |
+| M5        | Every new thread in a sandbox by default, with the "Not sandboxed" fallback (3.11)                      | next                                                   |
+| M6        | Egress allowlist through the channel (3.5), so installs work with `--network none`                      |                                                        |
+| M7        | Sandboxes page and thread badge (P9), screenshots                                                       |                                                        |
+| M8        | Seam coverage test C6 (3.7): every web-profile tool routed, host-only or refused                        |                                                        |
+| M9        | microsandbox provider and the Fedora evaluation (P6, P7)                                                | Fedora                                                 |
 
-**Resume here:** M5. Measured here, Docker 29 rootful, this cloud VM: container create to ready 2.7 s (volume,
+**Resume here:** M4 model egress: a guest `listen` (the reverse of `connect`) and a host proxy that holds the model key; then M5. Measured here, Docker 29 rootful, this cloud VM: container create to ready 2.7 s (volume,
 one-shot chown container, start, git copy-in), warm start of a stopped sandbox 250 ms, guest file call 0.54 ms p50.
 The 2 s create budget needs the warm pool of 3.12 or a pre-chowned volume.
 
@@ -34,11 +34,17 @@ The 2 s create budget needs the warm pool of 3.12 or a pre-chowned volume.
 - Records are plugin-storage entries, not a SQLite file: a handful of rows per machine, written one at a time.
 - A sandbox is created explicitly (`sandbox_create`) and appears as a DSH project; a thread started in that project
   works in the sandbox. Making it the default for every new thread is M5.
-- Remote mode reuses mode B on the sandbox host: the remote DSH runs the agent loop outside the sandbox, so the model
-  key never enters it, and its files and commands run in the container there. The user's DSH reaches it through
-  multi-host (`runtimeSandboxCall`, tool `multi_host_sandbox`) and mirrors the thread as any remote thread. A DSH
-  runtime _inside_ each sandbox (3.13) stays possible for full agent isolation, but is not needed for the guarantees
-  of 3.6.
+- Remote mode A is a `runtime`-mode sandbox: a whole DSH (stock core, the `web` profile plus multi-host) runs inside
+  the hardened container, agent loop included; the sandbox host only relays bytes through a loopback port forwarded
+  over the guest channel (`connect` in the protocol), and republishes the runtime's multi-host launch file at the same
+  path as the runtime's DSH home, so multi-host registers it like any runtime of that host. The user decided on
+  2026-11-15 that no agent runs outside the sandbox assigned to it; the brain-outside variant was removed.
+- S15 (2026-11-15): the stock DSH boots inside a container with `--read-only`, `--network none`, uid 1000 and no
+  capability in 4.5 s, once its native-binding cache (`NARB_NATIVE_CACHE_DIR`) is off the noexec `/tmp`; the image
+  is 2.6 GB, most of it the DSH core. S16: multi-host's gateway passes the runtime's identity check (protocol 1,
+  profile `sandbox`, home leaf `home`, 0.2.2-rc.2) and creates a native session inside it.
+- Still to do for mode A: model egress (the runtime has no network; a proxy on the host will hold the key), a warm
+  pool for the 2 s budget, and registering the runtime in the user's multi-host in one step.
 - Found on the way: `ctx.subprocess` drops `GIT_CONFIG_KEY_<n>` (its secret filter matches `KEY`) but keeps
   `GIT_CONFIG_COUNT`, which breaks git wherever that variable is set; the plugin resets the count for its own git calls.
   A Docker named volume mounted at a new path copies the image's root-owned mount point onto the empty volume, so the
