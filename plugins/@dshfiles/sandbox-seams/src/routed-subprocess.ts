@@ -56,7 +56,6 @@ class RoutedProcess {
   private guest: GuestProcess | undefined
   private exited = false
   private terminating = false
-  private graceTimer: ReturnType<typeof setTimeout> | undefined
   private readonly spec: SubprocessSpawnSpec
 
   constructor(route: SandboxRoute, spec: SubprocessSpawnSpec, spill: { readonly dir: string; readonly onFailure: SpillFailureReporter }) {
@@ -89,7 +88,7 @@ class RoutedProcess {
         guest.stderr.pipe(stderr.stream)
         this.connectStdin(guest.stdin, stdin)
         // A terminate() that arrived while the process was starting applies now.
-        if (this.terminating) this.signalGuest('SIGTERM')
+        if (this.terminating) guest.kill('SIGTERM', spec.graceMs)
         const exit = await guest.done
         await Promise.all([RoutedProcess.ended(stdout.stream), RoutedProcess.ended(stderr.stream)])
         return { exitCode: exit.exitCode, signal: exit.signal }
@@ -99,7 +98,6 @@ class RoutedProcess {
         throw RoutedProcess.spawnFailure(error, route, spec.argv[0] ?? '')
       } finally {
         this.exited = true
-        if (this.graceTimer !== undefined) clearTimeout(this.graceTimer)
         spec.signal?.removeEventListener('abort', onAbort)
         stdout.collector?.seal()
         stderr.collector?.seal()
@@ -123,16 +121,14 @@ class RoutedProcess {
     }
   }
 
-  /** TERM the process group now and KILL it after the grace period, once. */
+  /**
+   * TERM the process group now; the guest agent KILLs it after the grace period if it is still running, so the
+   * escalation holds even when the Host goes away meanwhile.
+   */
   terminate(): void {
     if (this.exited || this.terminating) return
     this.terminating = true
-    this.signalGuest('SIGTERM')
-    this.graceTimer = setTimeout(() => this.signalGuest('SIGKILL'), this.spec.graceMs)
-  }
-
-  private signalGuest(signal: NodeJS.Signals): void {
-    if (!this.exited) this.guest?.kill(signal)
+    this.guest?.kill('SIGTERM', this.spec.graceMs)
   }
 
   private connectStdin(target: Writable, source: PassThrough | undefined): void {

@@ -200,6 +200,11 @@ describe('the routed subprocess runtime', () => {
     expect(performance.now() - started).toBeLessThan(5_000)
     await expect(long.waitForExit()).resolves.toBe(true)
 
+    const stubborn = subprocess.spawn(bash("trap '' TERM; sleep 30", workspace))
+    await new Promise(resolve => setTimeout(resolve, 100))
+    stubborn.terminate()
+    await expect(stubborn.done).resolves.toMatchObject({ signal: 'SIGKILL' })
+
     const controller = new AbortController()
     const aborted = subprocess.spawn(bash('sleep 30', workspace, { signal: controller.signal }))
     controller.abort()

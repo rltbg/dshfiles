@@ -13,11 +13,11 @@ Give each agent thread its own sandbox, in two modes chosen by where the sandbox
 | Milestone | Package | State |
 | --- | --- | --- |
 | M1 | `@dshfiles/sandbox-guest`: guest agent, stdio channel, local and container tests | done |
-| M2 | `@dshfiles/sandbox-seams`: routed `fs`, `subprocess`, `sandbox` and the route table | next |
-| M3 | `@dshfiles/sandboxes`: providers (container, directory), records, lifecycle, git sync, API, agent tools | |
+| M2 | `@dshfiles/sandbox-seams`: routed `fs`, `subprocess`, `sandbox` and the route table | done |
+| M3 | `@dshfiles/sandboxes`: providers (container, directory), records, lifecycle, git sync, API, agent tools | next |
 | M4 | Remote mode A | |
 
-**Resume here:** M2, `@dshfiles/sandbox-seams`.
+**Resume here:** M3, `@dshfiles/sandboxes`.
 
 | Phase | Deliverable                                                           | Where it is tested                       | State       |
 | ----- | --------------------------------------------------------------------- | ---------------------------------------- | ----------- |
