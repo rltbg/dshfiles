@@ -8,16 +8,41 @@ Give each agent thread its own sandbox, in two modes chosen by where the sandbox
 - **Remote (mode A):** the sandbox runs on another machine and holds a whole DSH runtime, as Claude Code's cloud
   sessions do. The user's DSH shows the thread through multi-host.
 
-**Status:** implementation started. Spikes S3, S12 and S14 done.
+**Status:** M1 to M4 done and tested here (2026-11-15); the next work is defaults, egress and the UI.
 
-| Milestone | Package | State |
-| --- | --- | --- |
-| M1 | `@dshfiles/sandbox-guest`: guest agent, stdio channel, local and container tests | done |
-| M2 | `@dshfiles/sandbox-seams`: routed `fs`, `subprocess`, `sandbox` and the route table | done |
-| M3 | `@dshfiles/sandboxes`: providers (container, directory), records, lifecycle, git sync, API, agent tools | next |
-| M4 | Remote mode A | |
+| Milestone | Package                                                                                                 | State            |
+| --------- | ------------------------------------------------------------------------------------------------------- | ---------------- |
+| M1        | `@dshfiles/sandbox-guest`: guest agent, stdio channel, local and container tests                        | done             |
+| M2        | `@dshfiles/sandbox-seams`: routed `fs`, `subprocess`, `sandbox` and the route table                     | done             |
+| M3        | `@dshfiles/sandboxes`: providers (container, directory), records, lifecycle, git sync, API, agent tools | done             |
+| M4        | Remote mode: `multi_host_sandbox` reaches a host's sandboxes; threads there run in them                 | done (see below) |
+| M5        | Every new thread in a sandbox by default, with the "Not sandboxed" fallback (3.11)                      | next             |
+| M6        | Egress allowlist through the channel (3.5), so installs work with `--network none`                      |                  |
+| M7        | Sandboxes page and thread badge (P9), screenshots                                                       |                  |
+| M8        | Seam coverage test C6 (3.7): every web-profile tool routed, host-only or refused                        |                  |
+| M9        | microsandbox provider and the Fedora evaluation (P6, P7)                                                | Fedora           |
 
-**Resume here:** M3, `@dshfiles/sandboxes`.
+**Resume here:** M5. Measured here, Docker 29 rootful, this cloud VM: container create to ready 2.7 s (volume,
+one-shot chown container, start, git copy-in), warm start of a stopped sandbox 250 ms, guest file call 0.54 ms p50.
+The 2 s create budget needs the warm pool of 3.12 or a pre-chowned volume.
+
+**What M3 and M4 changed from the design.**
+
+- The orchestrator lives in `@dshfiles/sandboxes` with the providers inside it, and the routed providers in
+  `@dshfiles/sandbox-seams`; there is no separate port, container or directory package yet. The port is
+  `src/port.ts`, ready to move into a dshx module when a provider ships on its own.
+- Records are plugin-storage entries, not a SQLite file: a handful of rows per machine, written one at a time.
+- A sandbox is created explicitly (`sandbox_create`) and appears as a DSH project; a thread started in that project
+  works in the sandbox. Making it the default for every new thread is M5.
+- Remote mode reuses mode B on the sandbox host: the remote DSH runs the agent loop outside the sandbox, so the model
+  key never enters it, and its files and commands run in the container there. The user's DSH reaches it through
+  multi-host (`runtimeSandboxCall`, tool `multi_host_sandbox`) and mirrors the thread as any remote thread. A DSH
+  runtime _inside_ each sandbox (3.13) stays possible for full agent isolation, but is not needed for the guarantees
+  of 3.6.
+- Found on the way: `ctx.subprocess` drops `GIT_CONFIG_KEY_<n>` (its secret filter matches `KEY`) but keeps
+  `GIT_CONFIG_COUNT`, which breaks git wherever that variable is set; the plugin resets the count for its own git calls.
+  A Docker named volume mounted at a new path copies the image's root-owned mount point onto the empty volume, so the
+  mount uses `volume-nocopy`.
 
 | Phase | Deliverable                                                           | Where it is tested                       | State       |
 | ----- | --------------------------------------------------------------------- | ---------------------------------------- | ----------- |
