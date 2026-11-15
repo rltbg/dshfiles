@@ -62,6 +62,22 @@
       "types": "./src/theme/appearance.ts",
       "default": "./src/theme/appearance.ts"
     },
+    "./theme/definition": {
+      "types": "./src/theme/theme-definition.ts",
+      "default": "./src/theme/theme-definition.ts"
+    },
+    "./theme/scenes": {
+      "types": "./src/theme/scene-catalog.ts",
+      "default": "./src/theme/scene-catalog.ts"
+    },
+    "./theme/gallery": {
+      "types": "./src/theme/gallery.ts",
+      "default": "./src/theme/gallery.ts"
+    },
+    "./theme/readability": {
+      "types": "./src/theme/readability.ts",
+      "default": "./src/theme/readability.ts"
+    },
     "./vite": {
       "types": "./src/vite.ts",
       "default": "./src/vite.ts"

@@ -1,5 +1,5 @@
 import Schema from '@deepseek-ai/schemastery'
-import { APPEARANCE_BOUNDS } from '@dshfiles/plugin-ui/theme/appearance'
+import { APPEARANCE_BOUNDS, SCENE_FRAME_RATE } from '@dshfiles/plugin-ui/theme/appearance'
 import { defineSettings } from '@dshfiles/dshx/settings'
 import { UI_STYLES_SETTINGS_NAMESPACE } from './settings-namespace.js'
 
@@ -21,6 +21,7 @@ export const appearanceSettings = defineSettings({
       Schema.const('high-contrast').description('High contrast: darker text and borders'),
       Schema.const('slate-blue').description('Slate blue: blue-grey, blue accent'),
       Schema.const('moss').description('Moss: green-grey, teal accent'),
+      Schema.const('dracula').description('Dracula: official Dracula in dark with an animated night sky, Alucard in light'),
     ])
       .default('warm-stone')
       .description('Colour preset for every surface, native and plugin, in both light and dark.'),
@@ -40,6 +41,36 @@ export const appearanceSettings = defineSettings({
     ])
       .default('sans')
       .description('Font for reply prose in threads. Serif uses a font already on your device; code and tables keep their fonts.'),
+    readingBlur: Schema.natural()
+      .min(0)
+      .max(24)
+      .default(0)
+      .description(
+        'Blur under the conversation column while a backdrop scene shows, in px (0–24). The blur is a still of the scene, computed once, so it costs nothing per frame; the scene keeps moving on the sides.',
+      ),
+    readingTint: Schema.natural()
+      .min(0)
+      .max(100)
+      .default(0)
+      .description(
+        'Extra tint of the theme background under the conversation column while a backdrop shows, in percent (0–100). Each theme already lays the least tint its text needs to stay readable over its scene.',
+      ),
+    sceneFrameRate: Schema.natural()
+      .min(SCENE_FRAME_RATE.min)
+      .max(SCENE_FRAME_RATE.max)
+      .default(SCENE_FRAME_RATE.default)
+      .description(
+        `Frames per second an animated backdrop scene moves at (${SCENE_FRAME_RATE.min}–${SCENE_FRAME_RATE.max}, default ${SCENE_FRAME_RATE.default}). Each frame repaints the whole scene, so CPU use grows with it; 0 shows a still picture and costs nothing. The backdrop only moves in the focused tab; every other tab holds its frame.`,
+      ),
+    customTheme: Schema.string()
+      .default('')
+      .description(
+        'Id of a saved theme to use instead of the preset. Ask the agent for any theme ("a Nord theme", "Tokyo Night with falling snow"); it saves it and switches to it. Empty uses the preset.',
+      ),
+    customThemes: Schema.array(Schema.any())
+      .default([])
+      .hidden()
+      .description('Saved theme definitions (exact colours per scheme, syntax colours, optional backdrop). Written by the theme_define agent tool.'),
   }).description('Colours and fonts for every surface, native and plugin, in light and dark. Light, dark or system is set in General › Appearance.'),
   applies: 'live',
 })

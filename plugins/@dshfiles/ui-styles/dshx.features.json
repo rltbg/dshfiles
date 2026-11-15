@@ -34,38 +34,33 @@
     {
       "id": "appearance-theme",
       "title": "Appearance theme: presets, palette and fonts",
-      "summary": "Settings \u203a General \u203a Appearance picks a colour preset (Warm stone default, Neutral, High contrast, Slate blue, Moss), optional hue, tint, accent and contrast overrides, and the UI and code fonts. The client regenerates the palette with the plugin-ui generator and injects it over the static first-paint theme only when it differs from the default, so native core surfaces (--dsw-* remap) and plugins follow at once in light and dark; theme_get reads it and theme_set changes or resets it.",
+      "summary": "Settings › General › Appearance picks a colour preset (Warm stone default, Neutral, High contrast, Slate blue, Moss, Dracula), optional hue, tint, accent and contrast overrides, and the UI and code fonts. The client regenerates the palette with the plugin-ui generator and injects it over the static first-paint theme only when it differs from the default, so native core surfaces (--dsw-* remap) and plugins follow at once in light and dark; theme_get reads it and theme_set changes or resets it.",
       "onboarding": {
         "firstAction": "Open Settings › General › Appearance and pick a preset, or change the accent and the interface font.",
         "doneWhen": "The whole app takes the new colours and fonts at once, light and dark."
       },
-      "reach": [
-        "click button \"Account menu\"",
-        "click menuitem \"Settings*\"",
-        "click button \"Appearance\"",
-        "expect text \"Colour preset for every surface*\""
-      ],
+      "reach": ["click button \"Settings\"", "click text \"All settings\"", "click button \"Appearance\"", "expect text \"Colour preset for every surface*\""],
       "surfaces": ["client", "host", "settings", "tool"],
       "surface": "settingsSection",
       "destination": "settings",
-      "currentSurface": "Settings \u203a General \u203a Appearance; agent tools theme_get / theme_set",
+      "currentSurface": "Settings › General › Appearance; agent tools theme_get / theme_set",
       "configuration": [
         {
           "key": "preset",
           "defaultValue": "warm-stone",
-          "constraints": "warm-stone, neutral, high-contrast, slate-blue or moss.",
+          "constraints": "warm-stone, neutral, high-contrast, slate-blue, moss or dracula.",
           "coveredBy": ["ui-styles.appearance-defaults", "ui-styles.appearance-aa"]
         },
         {
           "key": "greyHue / greyTint / accentHue / contrast",
           "defaultValue": "empty (the preset's value)",
-          "constraints": "hue and accentHue 0\u2013360, chroma 0\u20130.03, contrast 1\u20131.5; every corner keeps WCAG AA text.",
+          "constraints": "hue and accentHue 0–360, chroma 0–0.03, contrast 1–1.5; every corner keeps WCAG AA text.",
           "coveredBy": ["ui-styles.appearance-bounds", "ui-styles.appearance-aa"]
         },
         {
           "key": "interfaceFont / codeFont",
           "defaultValue": "geist / geist-mono",
-          "constraints": "geist or system; geist-mono or system. A family typed in Settings \u203a Font still wins.",
+          "constraints": "geist or system; geist-mono or system. A family typed in Settings › Font still wins.",
           "coveredBy": ["ui-styles.appearance-defaults"]
         }
       ],
@@ -108,7 +103,154 @@
           "kind": "unit-test",
           "id": "ui-styles.theme-tool-round-trip",
           "file": "plugins/@dshfiles/ui-styles/tests/appearance.test.ts",
-          "testName": "round-trips get \u2192 set \u2192 reset through the Host settings service"
+          "testName": "round-trips get → set → reset through the Host settings service"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "automatic",
+          "source": "api-dispatch"
+        },
+        {
+          "kind": "automatic",
+          "source": "agent-tool"
+        }
+      ]
+    },
+    {
+      "id": "saved-themes",
+      "title": "Saved and gallery themes: any theme on request, Claude Code scenes, and Dracula",
+      "summary": "A theme is data: exact colours per scheme (eleven neutral steps, accent and status colours), optional syntax colours and an optional animated backdrop behind the conversation. The agent saves any theme the user asks for with theme_define and it applies live, no restart; theme_set customTheme switches between saved themes and presets; theme_remove deletes one. The built-in Dracula preset uses the same format: official Dracula Classic in dark with a night sky (twinkling stars, a violet moon), official Alucard Classic in light. Sixteen built-in gallery themes paint the twenty animated scenes of Claude Code’s theme-examples plugin (Apache-2.0, vendored, built on the Host and served to the client by the scene method), each under its glass in the scheme it is drawn for. Under the conversation column each theme lays the least veil its primary, secondary and tertiary text and icons need anywhere over its scene; readingBlur and readingTint add a blur (live over the moving scene where the browser composites on a GPU, a pre-blurred still without one) and more tint. The scene is one picture fixed behind the whole workbench, shown only behind conversation panes; the composer seat continues the veil, the turn rail and the user bubble get readable surfaces over the scene.",
+      "onboarding": {
+        "firstAction": "Ask the agent for a theme, for example “make DSH look like Nord”, or pick the Dracula preset in Settings › Appearance.",
+        "doneWhen": "The app takes the theme's exact colours at once, with its backdrop behind the conversation if it has one."
+      },
+      "surfaces": ["client", "host", "settings", "tool"],
+      "surface": "settingsSection",
+      "destination": "settings",
+      "currentSurface": "Agent tools theme_define / theme_set (customTheme) / theme_remove / theme_get; Settings › General › Appearance (Custom theme id, Dracula preset)",
+      "configuration": [
+        {
+          "key": "customTheme",
+          "defaultValue": "empty (the preset)",
+          "constraints": "the id of a saved theme; theme_set refuses an unknown id.",
+          "coveredBy": ["ui-styles.saved-theme-lifecycle"]
+        },
+        {
+          "key": "customThemes",
+          "defaultValue": "[]",
+          "constraints": "hidden; written by theme_define. Invalid entries are skipped; a backdrop has 1–3 layers of declarations without url(), @import or braces.",
+          "coveredBy": ["ui-styles.theme-definition-parse", "ui-styles.saved-theme-lifecycle"]
+        },
+        {
+          "key": "readingBlur / readingTint",
+          "defaultValue": "0 / 0",
+          "constraints": "0–24 px and 0–100 %; add to the theme's own readability veil; kept across theme changes, 0 after reset.",
+          "coveredBy": ["ui-styles.reading-veil", "ui-styles.readability-veil"]
+        },
+        {
+          "key": "sceneFrameRate",
+          "defaultValue": "12",
+          "constraints": "0–30 whole frames per second a scene moves at; 0 shows its resting picture. Each frame repaints the whole scene, so CPU use grows with it. Only the focused tab moves its backdrop; other tabs hold their frame and pause animated layers. Kept across theme changes, 12 after reset.",
+          "coveredBy": ["ui-styles.scene-frame-rate", "ui-styles.scene-clock", "ui-styles.scene-held-tab"]
+        }
+      ],
+      "states": ["preset", "saved-theme", "saved-theme-overridden", "saved-theme-missing", "gallery-theme", "scene-loading"],
+      "failureModes": [
+        "A definition with a missing or malformed colour, a preset id, or a backdrop that loads anything is refused with every problem listed, so the agent can fix it in one retry.",
+        "The chosen saved theme was deleted or became invalid: the preset applies.",
+        "Text under WCAG AA is reported in contrastWarnings; the theme still applies so an official palette is not altered.",
+        "The Host cannot serve a scene: the theme applies with its colours and glass, without the scene, and the browser console names the scene."
+      ],
+      "externalDependencies": [],
+      "verification": [
+        {
+          "kind": "gherkin",
+          "id": "ui-styles.saved-theme-agent",
+          "featureFile": "tooling/dshx/e2e/features/ui-styles.feature"
+        },
+        {
+          "kind": "gherkin",
+          "id": "ui-styles.gallery-theme-agent",
+          "featureFile": "tooling/dshx/e2e/features/ui-styles.feature"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.theme-definition-parse",
+          "file": "plugins/@dshfiles/plugin-ui/tests/theme-definition.test.ts",
+          "testName": "keeps a backdrop self-contained: no url(), @import or a brace that escapes its layer"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.saved-theme-lifecycle",
+          "file": "plugins/@dshfiles/ui-styles/tests/appearance.test.ts",
+          "testName": "saves a theme, switches to it live, and replaces it when saved again"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.dracula-official",
+          "file": "plugins/@dshfiles/plugin-ui/tests/theme-definition.test.ts",
+          "testName": "is a valid definition with the official Dracula and Alucard backgrounds"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.scene-safety",
+          "file": "plugins/@dshfiles/ui-styles/tests/scenes.test.ts",
+          "testName": "builds every catalog scene as a self-contained SVG that loads nothing"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.gallery-aa",
+          "file": "plugins/@dshfiles/plugin-ui/tests/gallery.test.ts",
+          "testName": "are valid definitions whose text keeps WCAG AA"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.reading-veil",
+          "file": "plugins/@dshfiles/plugin-ui/tests/gallery.test.ts",
+          "testName": "blurs a still of the scene under the column and tints it as far as asked, with no filter per frame without a GPU"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.readability-veil",
+          "file": "plugins/@dshfiles/plugin-ui/tests/gallery.test.ts",
+          "testName": "keeps its text readable over its scene with a veil, whatever the user asks"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.backdrop-readability-all-themes",
+          "file": "plugins/@dshfiles/plugin-ui/tests/backdrop-readability.test.ts",
+          "testName": "covers every built-in scene, sampled from a real raster"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.backdrop-one-scene",
+          "file": "plugins/@dshfiles/plugin-ui/tests/backdrop-readability.test.ts",
+          "testName": "draws one scene for the whole workbench: docked panes give up the transform that re-framed fixed backgrounds"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.scene-frame-rate",
+          "file": "plugins/@dshfiles/ui-styles/tests/appearance.test.ts",
+          "testName": "keeps the scene frame rate across theme changes, clamps it to whole frames, and restores the default on reset"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.scene-clock",
+          "file": "plugins/@dshfiles/ui-styles/tests/scene-stage.test.ts",
+          "testName": "pauses each animation once and moves it to where it would have run freely"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.scene-held-tab",
+          "file": "plugins/@dshfiles/ui-styles/tests/scene-stage.test.ts",
+          "testName": "leaves a held scene alone: no write, so the browser repaints nothing"
+        },
+        {
+          "kind": "unit-test",
+          "id": "ui-styles.backdrop-gpu-blur",
+          "file": "plugins/@dshfiles/plugin-ui/tests/backdrop-readability.test.ts",
+          "testName": "blurs the moving scene live only where the browser composites on a GPU, the still everywhere else"
         }
       ],
       "telemetry": [
